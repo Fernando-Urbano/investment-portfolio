@@ -1,0 +1,358 @@
+The following contains a tree of the directory and all the important files
+
+================================================================================
+
+FILE NAME: scripts/tree_output.txt
+
+.
+├── README.md
+├── __pycache__
+│   ├── config.cpython-312.pyc
+│   └── run.cpython-312.pyc
+├── app
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-312.pyc
+│   │   ├── models.cpython-312.pyc
+│   │   └── routes.cpython-312.pyc
+│   ├── models.py
+│   ├── routes.py
+│   ├── static
+│   └── templates
+├── config.py
+├── join_files.py
+├── migrations
+│   ├── README
+│   ├── __pycache__
+│   │   └── env.cpython-312.pyc
+│   ├── alembic.ini
+│   ├── env.py
+│   ├── script.py.mako
+│   └── versions
+│       ├── 7e29d8746a69_add_timestamp_fields_to_models.py
+│       └── __pycache__
+│           └── 7e29d8746a69_add_timestamp_fields_to_models.cpython-312.pyc
+├── requirements.txt
+├── run.py
+└── scripts
+
+11 directories, 20 files
+
+
+================================================================================
+
+FILE NAME: scripts/migrations.txt
+
+Migrations:
+
+================================================================================
+
+FILE NAME: migrations/env.py
+
+import logging
+from logging.config import fileConfig
+
+from flask import current_app
+
+from alembic import context
+
+# this is the Alembic Config object, which provides
+# access to the values within the .ini file in use.
+config = context.config
+
+# Interpret the config file for Python logging.
+# This line sets up loggers basically.
+fileConfig(config.config_file_name)
+logger = logging.getLogger('alembic.env')
+
+
+def get_engine():
+    try:
+        # this works with Flask-SQLAlchemy<3 and Alchemical
+        return current_app.extensions['migrate'].db.get_engine()
+    except (TypeError, AttributeError):
+        # this works with Flask-SQLAlchemy>=3
+        return current_app.extensions['migrate'].db.engine
+
+
+def get_engine_url():
+    try:
+        return get_engine().url.render_as_string(hide_password=False).replace(
+            '%', '%%')
+    except AttributeError:
+        return str(get_engine().url).replace('%', '%%')
+
+
+# add your model's MetaData object here
+# for 'autogenerate' support
+# from myapp import mymodel
+# target_metadata = mymodel.Base.metadata
+config.set_main_option('sqlalchemy.url', get_engine_url())
+target_db = current_app.extensions['migrate'].db
+
+# other values from the config, defined by the needs of env.py,
+# can be acquired:
+# my_important_option = config.get_main_option("my_important_option")
+# ... etc.
+
+
+def get_metadata():
+    if hasattr(target_db, 'metadatas'):
+        return target_db.metadatas[None]
+    return target_db.metadata
+
+
+def run_migrations_offline():
+    """Run migrations in 'offline' mode.
+
+    This configures the context with just a URL
+    and not an Engine, though an Engine is acceptable
+    here as well.  By skipping the Engine creation
+    we don't even need a DBAPI to be available.
+
+    Calls to context.execute() here emit the given string to the
+    script output.
+
+    """
+    url = config.get_main_option("sqlalchemy.url")
+    context.configure(
+        url=url, target_metadata=get_metadata(), literal_binds=True
+    )
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+def run_migrations_online():
+    """Run migrations in 'online' mode.
+
+    In this scenario we need to create an Engine
+    and associate a connection with the context.
+
+    """
+
+    # this callback is used to prevent an auto-migration from being generated
+    # when there are no changes to the schema
+    # reference: http://alembic.zzzcomputing.com/en/latest/cookbook.html
+    def process_revision_directives(context, revision, directives):
+        if getattr(config.cmd_opts, 'autogenerate', False):
+            script = directives[0]
+            if script.upgrade_ops.is_empty():
+                directives[:] = []
+                logger.info('No changes in schema detected.')
+
+    conf_args = current_app.extensions['migrate'].configure_args
+    if conf_args.get("process_revision_directives") is None:
+        conf_args["process_revision_directives"] = process_revision_directives
+
+    connectable = get_engine()
+
+    with connectable.connect() as connection:
+        context.configure(
+            connection=connection,
+            target_metadata=get_metadata(),
+            **conf_args
+        )
+
+        with context.begin_transaction():
+            context.run_migrations()
+
+
+if context.is_offline_mode():
+    run_migrations_offline()
+else:
+    run_migrations_online()
+
+
+================================================================================
+
+FILE NAME: migrations/alembic.ini
+
+# A generic, single database configuration.
+
+[alembic]
+# template used to generate migration files
+# file_template = %%(rev)s_%%(slug)s
+
+# set to 'true' to run the environment during
+# the 'revision' command, regardless of autogenerate
+# revision_environment = false
+
+
+# Logging configuration
+[loggers]
+keys = root,sqlalchemy,alembic,flask_migrate
+
+[handlers]
+keys = console
+
+[formatters]
+keys = generic
+
+[logger_root]
+level = WARN
+handlers = console
+qualname =
+
+[logger_sqlalchemy]
+level = WARN
+handlers =
+qualname = sqlalchemy.engine
+
+[logger_alembic]
+level = INFO
+handlers =
+qualname = alembic
+
+[logger_flask_migrate]
+level = INFO
+handlers =
+qualname = flask_migrate
+
+[handler_console]
+class = StreamHandler
+args = (sys.stderr,)
+level = NOTSET
+formatter = generic
+
+[formatter_generic]
+format = %(levelname)-5.5s [%(name)s] %(message)s
+datefmt = %H:%M:%S
+
+
+================================================================================
+
+
+
+================================================================================
+
+FILE NAME: scripts/app.txt
+
+App files:
+
+================================================================================
+
+FILE NAME: app/models.py
+
+from app import db
+from sqlalchemy.sql import func
+
+
+class Asset(db.Model):
+    __tablename__ = 'asset'  # Explicitly defining the table name
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    description = db.Column(db.String(200))
+    is_tradable = db.Column(db.Boolean, default=False)
+    time_series = db.relationship('TimeSeries', backref='asset', lazy=True)
+
+    # Timestamp fields
+    date_create = db.Column(db.DateTime(timezone=True), server_default=func.now(), nullable=False)
+    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    def __repr__(self):
+        return f'<Asset {self.name}>'
+
+
+class TimeSeriesType(db.Model):
+    __tablename__ = 'time_series_type'  # Explicitly defining the table name
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False, unique=True)
+    
+    description = db.Column(db.String(200))
+    time_series = db.relationship('TimeSeries', backref='time_series_type', lazy=True)
+
+    # Timestamp fields
+    date_create = db.Column(db.DateTime(timezone=True), server_default=func.now(), nullable=False)
+    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    def __repr__(self):
+        return f'<TimeSeriesType {self.name}>'
+
+
+class TimeSeries(db.Model):
+    __tablename__ = 'time_series'  # Explicitly defining the table name
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    type_id = db.Column(db.Integer, db.ForeignKey('time_series_type.id'), nullable=False)
+    asset_id = db.Column(db.Integer, db.ForeignKey('asset.id'), nullable=False)
+    data_points = db.relationship('DataPoint', backref='time_series', lazy=True)
+
+    # Timestamp fields
+    date_create = db.Column(db.DateTime(timezone=True), server_default=func.now(), nullable=False)
+    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    def __repr__(self):
+        return f'<TimeSeries {self.name}>'
+
+
+class DataPoint(db.Model):
+    __tablename__ = 'data_point'  # Explicitly defining the table name
+    id = db.Column(db.Integer, primary_key=True)
+    date = db.Column(db.Date, nullable=False)
+    value = db.Column(db.Float, nullable=False)
+    date_release = db.Column(db.Date, nullable=True)  # New field added
+    time_series_id = db.Column(db.Integer, db.ForeignKey('time_series.id'), nullable=False)
+
+    # Timestamp fields
+    date_create = db.Column(db.DateTime(timezone=True), server_default=func.now(), nullable=False)
+    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+
+    def __repr__(self):
+        return f'<DataPoint {self.date}: {self.value}>'
+
+================================================================================
+
+FILE NAME: app/__init__.py
+
+from flask import Flask
+from flask_sqlalchemy import SQLAlchemy
+from config import config  # Import the config dictionary
+from flask_migrate import Migrate
+import os
+
+db = SQLAlchemy()
+migrate = Migrate()
+
+def create_app(config_name=None):
+    app = Flask(__name__)
+    
+    # Determine the configuration to use
+    if config_name is None:
+        config_name = os.getenv('FLASK_ENV') or 'default'
+    
+    # Use the configuration class from the config dictionary
+    app.config.from_object(config[config_name])
+    
+    # Initialize extensions
+    db.init_app(app)
+    migrate.init_app(app, db)
+    
+    # Import and register Blueprints
+    from .routes import main
+    app.register_blueprint(main)
+    
+    with app.app_context():
+        from . import models
+    
+    return app
+
+================================================================================
+
+FILE NAME: app/routes.py
+
+from flask import Blueprint
+
+# Define the Blueprint
+main = Blueprint('main', __name__)
+
+@main.route('/')
+def home():
+    return "Welcome to the Investment Portfolio App!"
+
+================================================================================
+
+
+
+================================================================================
+

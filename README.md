@@ -75,15 +75,51 @@ The expected output should be:
 (4 rows)
 ```
 
-Make migrations:
+
+# Migrations:
+If running the development database:
+```bash
+export FLASK_APP=development
+```
+
+If running the tets database:
+```bash
+export FLASK_ENV=testing
+```
+
+Run the following only if there are no initial migrations:
 ```bash
 python -m flask db init
 ```
 
+Now, regardless of having or not migrated the database, run the following commands:
+
 ```bash
-python -m flask db migrate -m "Initial migration."
+python -m flask db migrate -m "comment"
 ```
 
 ```bash
 python -m flask db upgrade
+```
+
+Check for updates:
+
+In development:
+```bash
+psql investment_portfolio
+```
+
+In testing:
+```bash
+psql investment_portfolio_test
+```
+
+Inside the PostgreSQL shell, check for the available tables:
+```
+\dt
+```
+
+Go inside the desired table:
+```
+\d asset
 ```
