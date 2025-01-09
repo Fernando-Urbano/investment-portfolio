@@ -10,19 +10,21 @@ class Config:
 class DevelopmentConfig(Config):
     """Development configuration."""
     DEBUG = True
-    SQLALCHEMY_DATABASE_URI = 'postgresql://fernandorochacorreaurbano@localhost/investment_portfolio'
+    # Use file-based SQLite for development
+    SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(basedir, 'dev_database.db')}"
 
 class TestingConfig(Config):
     """Testing configuration."""
     TESTING = True
-    SQLALCHEMY_DATABASE_URI = 'postgresql://fernandorochacorreaurbano@localhost/investment_portfolio_test'
-    # Optional: Disable CSRF protection in forms for testing
+    # Use in-memory SQLite for testing
+    SQLALCHEMY_DATABASE_URI = "sqlite:///:memory:"
     WTF_CSRF_ENABLED = False
 
 class ProductionConfig(Config):
     """Production configuration."""
-    SQLALCHEMY_DATABASE_URI = 'postgresql://fernandorochacorreaurbano@localhost/investment_portfolio'
-    # Add production-specific configurations here
+    # You could use another file-based (or a real production DB).
+    # For a simple setup, here’s an example of a file-based prod DB:
+    SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(basedir, 'prod_database.db')}"
 
 # Dictionary to easily access configurations
 config = {

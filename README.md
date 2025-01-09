@@ -7,7 +7,7 @@ The following steps are used to create the virtual environment.
 
 Inside your terminal, write:
 ```bash
-conda create -n invp python=3.12.5
+conda create -n invp python=3.12.6
 ```
 
 Activate virtual environment:
@@ -77,49 +77,27 @@ The expected output should be:
 
 
 # Migrations:
-If running the development database:
 ```bash
 export FLASK_APP=development
 ```
 
-If running the tets database:
-```bash
-export FLASK_ENV=testing
+```
+flask db migrate -m "Initial migration for Development SQLite"
 ```
 
-Run the following only if there are no initial migrations:
 ```bash
 python -m flask db init
 ```
 
-Now, regardless of having or not migrated the database, run the following commands:
+```bash
+export FLASK_ENV=production
+```
+
+```
+flask db migrate -m "Initial migration for Production SQLite"
+```
 
 ```bash
-python -m flask db migrate -m "comment"
+python -m flask db init
 ```
 
-```bash
-python -m flask db upgrade
-```
-
-Check for updates:
-
-In development:
-```bash
-psql investment_portfolio
-```
-
-In testing:
-```bash
-psql investment_portfolio_test
-```
-
-Inside the PostgreSQL shell, check for the available tables:
-```
-\dt
-```
-
-Go inside the desired table:
-```
-\d asset
-```

@@ -15,17 +15,6 @@
 │   └── templates
 ├── config.py
 ├── join_files.py
-├── migrations
-│   ├── README
-│   ├── __pycache__
-│   │   └── env.cpython-312.pyc
-│   ├── alembic.ini
-│   ├── env.py
-│   ├── script.py.mako
-│   └── versions
-│       ├── 7e29d8746a69_add_timestamp_fields_to_models.py
-│       └── __pycache__
-│           └── 7e29d8746a69_add_timestamp_fields_to_models.cpython-312.pyc
 ├── requirements.txt
 ├── run.py
 ├── scripts
@@ -44,4 +33,4 @@
     ├── test_save_modules.py
     └── test_timeseries.py
 
-13 directories, 32 files
+9 directories, 25 files

@@ -1,2 +1,17 @@
 .vscode
 __pycache__
+*.db
+*.csv
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.docx
+*.doc
+*.pptx
+*.ppt
+*.xls
+*.xlsx
+*.txt
+*.log
+

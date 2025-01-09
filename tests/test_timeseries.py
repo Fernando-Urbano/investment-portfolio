@@ -1,29 +1,27 @@
+# tests/test_timeseries.py
+
 import pytest
 import datetime
 import pandas as pd
-from app.models import TimeSeries, DataPoint, Asset, TimeSeriesType
+from app.models import TimeSeries, DataPoint, SeriesGroup, TimeSeriesType
 from app import db  # Import db for database operations
 
 
 def test_from_dataframe_single_column(
     app,
     sample_df_single_column,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
     Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
 
     with app.app_context():
-        # Re-query Asset and TimeSeriesType to ensure they're attached to the current session
-        asset = db.session.get(Asset, asset_id)
-        tstype = db.session.get(TimeSeriesType, tstype_id)
-
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
-            asset=asset,
-            time_series_type=tstype
+            series_groups=[seriesgroup],  # Pass as a list of objects
+            time_series_type=tstype  # Assign the object directly
         )
 
         # Expect a single TimeSeries (not a list)
@@ -39,21 +37,21 @@ def test_from_dataframe_single_column(
             assert dp.value == expected_value, f"Expected value {expected_value}, got {dp.value}"
 
 
-def test_from_dataframe_single_column_with_asset_id_and_tstype_id(
+def test_from_dataframe_single_column_with_seriesgroup_and_tstype(
     app,
     sample_df_single_column,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
     Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
 
     with app.app_context():
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
-            asset=asset_id,
-            time_series_type=tstype_id
+            series_groups=[seriesgroup],  # Pass as a list of objects
+            time_series_type=tstype  # Assign the object directly
         )
 
         # Expect a single TimeSeries (not a list)
@@ -72,22 +70,22 @@ def test_from_dataframe_single_column_with_asset_id_and_tstype_id(
 def test_from_dataframe_single_column_with_date_as_column(
     app,
     sample_df_single_column,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
-    Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries.
+    Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries with a specified date column.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
 
-    sample_df = sample_df_single_column
+    sample_df = sample_df_single_column.copy()
     sample_df["Datetime"] = sample_df.index
     sample_df = sample_df.reset_index(drop=True)
 
     with app.app_context():
         ts_obj = TimeSeries.from_dataframe(
-            df=sample_df_single_column,
-            asset=asset_id,
-            time_series_type=tstype_id,
+            df=sample_df,
+            series_groups=[seriesgroup],  # Pass as a list of objects
+            time_series_type=tstype,  # Assign the object directly
             date_column="Datetime"
         )
 
@@ -98,8 +96,8 @@ def test_from_dataframe_single_column_with_date_as_column(
 
         # Check the data points
         for i, dp in enumerate(ts_obj.data_points):
-            expected_date = sample_df_single_column.index[i].date()
-            expected_value = sample_df_single_column["price"].iloc[i]
+            expected_date = sample_df["Datetime"][i].date()
+            expected_value = sample_df["price"].iloc[i]
             assert dp.date.date() == expected_date, f"Expected date {expected_date}, got {dp.date}"
             assert dp.value == expected_value, f"Expected value {expected_value}, got {dp.value}"
 
@@ -107,19 +105,23 @@ def test_from_dataframe_single_column_with_date_as_column(
 def test_from_dataframe_multi_column(
     app,
     sample_df_multiple_columns,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
     Test that from_dataframe handles a multi-column DataFrame and returns multiple TimeSeries.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
     num_columns = len(sample_df_multiple_columns.columns)
 
     with app.app_context():
+        # Since there are multiple columns, provide a list of SeriesGroup objects
+        # For simplicity, using the same SeriesGroup for all columns
+        series_groups = [seriesgroup for _ in range(num_columns)]
+
         ts_objs = TimeSeries.from_dataframe(
             df=sample_df_multiple_columns,
-            asset=asset_id,
-            time_series_type=tstype_id
+            series_groups=series_groups,  # Pass as a list of objects
+            time_series_type=tstype  # Assign the object directly
         )
 
         # Expect a list of TimeSeries objects
@@ -132,18 +134,22 @@ def test_from_dataframe_multi_column(
 def test_to_dataframe_multi_column(
     app,
     sample_df_multiple_columns,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
-    Test that from_dataframe handles a multi-column DataFrame and returns multiple TimeSeries.
+    Test that from_dataframe handles a multi-column DataFrame and the resulting TimeSeries can be converted back to DataFrame.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
 
     with app.app_context():
+        # Provide a list of SeriesGroup objects matching the number of columns
+        num_columns = len(sample_df_multiple_columns.columns)
+        series_groups = [seriesgroup for _ in range(num_columns)]
+
         ts_objs = TimeSeries.from_dataframe(
             df=sample_df_multiple_columns,
-            asset=asset_id,
-            time_series_type=tstype_id
+            series_groups=series_groups,  # Pass as a list of objects
+            time_series_type=tstype  # Assign the object directly
         )
         for ts_obj in ts_objs:
             ts_dataframe = ts_obj.to_dataframe()
@@ -154,18 +160,18 @@ def test_to_dataframe_multi_column(
 def test_to_dataframe_single_column(
     app,
     sample_df_single_column,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
-    Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries.
+    Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries, which can be converted back to DataFrame.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
 
     with app.app_context():
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
-            asset=asset_id,
-            time_series_type=tstype_id
+            series_groups=[seriesgroup],  # Pass as a list of objects
+            time_series_type=tstype  # Assign the object directly
         )
 
         ts_dataframe = ts_obj.to_dataframe()
@@ -174,6 +180,3 @@ def test_to_dataframe_single_column(
         assert list(ts_dataframe.columns) == ["price"], "DataFrame columns should match the input DataFrame."
         for i in range(5):
             assert ts_dataframe.iloc[i, 0] == sample_df_single_column.iloc[i, 0], "DataFrame values should match the input DataFrame."
-
-
-    

@@ -31,12 +31,14 @@ def app():
         db.session.remove()
         db.drop_all()
 
+
 @pytest.fixture(scope='function')
 def client(app):
     """
     Create a test client for the app.
     """
     return app.test_client()
+
 
 @pytest.fixture(scope='function')
 def runner(app):
@@ -45,10 +47,11 @@ def runner(app):
     """
     return app.test_cli_runner()
 
+
 # Import fixtures from fixtures.py
 from .fixtures import (
     populate_test_db,
     sample_df_single_column,    
     sample_df_multiple_columns,
-    create_asset_and_type  
+    create_seriesgroup_and_type  # Updated fixture name
 )

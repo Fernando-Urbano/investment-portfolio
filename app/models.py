@@ -1,8 +1,17 @@
+# app/models.py
+
 from app import db
 import pandas as pd
 from sqlalchemy.sql import func
 import datetime
 import re
+
+# Association table for many-to-many relationship between SeriesGroup and SeriesBase
+seriesgroup_seriesbase = db.Table(
+    'seriesgroup_seriesbase',
+    db.Column('seriesgroup_id', db.Integer, db.ForeignKey('series_group.id'), primary_key=True),
+    db.Column('seriesbase_id', db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
+)
 
 class BaseModel(db.Model):
     __abstract__ = True
@@ -30,66 +39,78 @@ class BaseModel(db.Model):
         """
         pass
 
-
-class Asset(BaseModel):
-    __tablename__ = 'asset'
+class SeriesBase(BaseModel):
+    __tablename__ = 'series_base'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.String(200))
-    is_tradable = db.Column(db.Boolean, default=False)
-    time_series = db.relationship('TimeSeries', backref='asset', lazy=True)
+    type = db.Column(db.String(50))  # Discriminator column
 
     date_create = db.Column(db.DateTime(timezone=True), server_default=func.now(), nullable=False)
-    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(),
+                            onupdate=func.now(), nullable=False)
+
+    __mapper_args__ = {
+        'polymorphic_identity': 'series_base',
+        'polymorphic_on': type,
+        'with_polymorphic': '*'
+    }
 
     def __repr__(self):
-        return f'<Asset {self.name}>'
+        return f'<SeriesBase {self.name}>'
 
+class SeriesGroup(SeriesBase):
+    __tablename__ = 'series_group'
+    id = db.Column(db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
+    series_code = db.Column(db.String(5), nullable=False, unique=True)  # Updated to 5 characters
 
-class TimeSeriesType(BaseModel):
-    __tablename__ = 'time_series_type'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(50), nullable=False, unique=True)
-    description = db.Column(db.String(200))
-    time_series = db.relationship('TimeSeries', backref='time_series_type', lazy=True)
+    # Self-referential relationship for nested SeriesGroups
+    parent_id = db.Column(db.Integer, db.ForeignKey('series_group.id'), nullable=True)
+    children = db.relationship(
+        'SeriesGroup',
+        backref=db.backref('parent', remote_side=[id]),
+        lazy='dynamic',
+        foreign_keys=[parent_id]  # Explicitly specify foreign_keys
+    )
 
-    date_create = db.Column(db.DateTime(timezone=True), server_default=func.now(), nullable=False)
-    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    # Many-to-many relationship with SeriesBase (TimeSeries and SeriesGroup)
+    series = db.relationship(
+        'SeriesBase',
+        secondary=seriesgroup_seriesbase,
+        backref=db.backref('series_groups', lazy='dynamic'),
+        lazy='dynamic'
+    )
+
+    __mapper_args__ = {
+        'polymorphic_identity': 'series_group',
+    }
 
     def __repr__(self):
-        return f'<TimeSeriesType {self.name}>'
-    
+        return f'<SeriesGroup {self.name}>'
 
-class TimeSeries(BaseModel):
+class TimeSeries(SeriesBase):
     __tablename__ = 'time_series'
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(100), nullable=False)
+    id = db.Column(db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
     type_id = db.Column(db.Integer, db.ForeignKey('time_series_type.id'), nullable=False)
-    asset_id = db.Column(db.Integer, db.ForeignKey('asset.id'), nullable=False)
+    delta_type = db.Column(db.String(10), nullable=True, default='pct')
+
     data_points = db.relationship('DataPoint', backref='time_series', lazy=True)
 
-    date_create = db.Column(db.DateTime(timezone=True), server_default=func.now(), nullable=False)
-    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
-
-    def __repr__(self):
-        return f'<TimeSeries {self.name}>'
+    __mapper_args__ = {
+        'polymorphic_identity': 'time_series',
+    }
 
     def _save_dependencies(self, session):
         """
-        Ensures the related TimeSeriesType, Asset, and DataPoint objects are also saved.
+        Ensures the related TimeSeriesType and DataPoint objects are also saved.
         """
         # Save the parent TimeSeriesType if it's new or modified
         if self.time_series_type:
             session.add(self.time_series_type)
 
-        # Save the parent Asset if it's new or modified
-        if self.asset:
-            session.add(self.asset)
-
         # Save child DataPoints
         for dp in self.data_points:
             session.add(dp)
-
 
     def to_dataframe(
             self,
@@ -101,8 +122,6 @@ class TimeSeries(BaseModel):
         """
         Returns the TimeSeries data as a pandas DataFrame.
         """
-        import pandas as pd
-
         data = {
             'date': [dp.date for dp in self.data_points],
             'value': [dp.value for dp in self.data_points],
@@ -137,17 +156,17 @@ class TimeSeries(BaseModel):
         if not include_date_create:
             ts_dataframe = ts_dataframe.drop(columns=['date_create'])
         return ts_dataframe
-        
 
     @classmethod
     def from_dataframe(
         cls,
         df,
-        asset=None,
+        series_groups=None,
         time_series_type=None,
         name=None,
         description=None,
-        date_column=None
+        date_column=None,
+        all_columns_have_same_series_groups=False
     ):
         """
         Creates one or more TimeSeries objects from a pandas DataFrame without saving to the database.
@@ -157,8 +176,6 @@ class TimeSeries(BaseModel):
         TimeSeries or List[TimeSeries]
             A single TimeSeries if exactly one column is processed, or a list of multiple TimeSeries objects.
         """
-        import pandas as pd
-
         if date_column is not None:
             if date_column not in df.columns:
                 raise ValueError(f"Date column '{date_column}' not found in DataFrame.")
@@ -176,17 +193,19 @@ class TimeSeries(BaseModel):
             if name is None:
                 name = df.columns[0]
 
-            if asset is None:
-                raise ValueError("Asset must be provided for DataFrame")
+            # Allow series_groups to be optional
+            if series_groups is not None:
+                if isinstance(description, list):
+                    description = description[0]
+            else:
+                if description is None:
+                    description = ""
             
-            if isinstance(description, list):
-                description = description[0]
-
             return cls.build_time_series_object(
                 df.iloc[:, 0].values,
                 df.index,
                 name,
-                asset,
+                series_groups,  # Can be None
                 time_series_type,
                 description
             )
@@ -200,37 +219,55 @@ class TimeSeries(BaseModel):
             else:
                 raise ValueError("Name must be provided as list")
             
-            if asset is None:
-                raise ValueError("Asset must be provided for DataFrame")
-            elif isinstance(asset, (str, int)):
-                asset = [asset] * len(df.columns)
-            elif not isinstance(asset, list):
-                raise ValueError("Asset must be provided as list, string, or id")
-                
-            if len(asset) != len(df.columns):
-                raise ValueError("Asset list must match the number of columns in the DataFrame.")
-            
+            # Allow series_groups to be optional
+            if series_groups is not None:
+                if isinstance(series_groups, (str, int, SeriesGroup)):
+                    series_groups = [series_groups] * len(df.columns)
+                elif not isinstance(series_groups, list):
+                    raise ValueError("SeriesGroups must be provided as list, string, or SeriesGroup instances")
+                    
+                if len(series_groups) != len(df.columns):
+                    if not all_columns_have_same_series_groups:
+                        raise ValueError(
+                            "SeriesGroups list must match the number of columns in the DataFrame or "
+                            + "parameter 'all_columns_have_same_series_groups=True'."
+                        )
+            else:
+                series_groups = [None] * len(df.columns)  # No groups associated
+
             if isinstance(description, str) and description is not None:
                 raise ValueError("Description must be a list if multiple columns are provided.")
             
+            if not all([g is None for g in series_groups]) and all_columns_have_same_series_groups:
+                all_columns_have_same_series_groups = True
+                col_series_groups = series_groups
+            else:
+                all_columns_have_same_series_groups = False
+
+
+            all_columns_have_same_series_groups = (
+                False if all([g is None for g in series_groups]) else all_columns_have_same_series_groups
+            )
+
             all_time_series = []
             for i, col in enumerate(df.columns):
+                if not all_columns_have_same_series_groups:
+                    col_series_groups = series_groups[i]
                 all_time_series.append(
                     cls.build_time_series_object(
                     df[col].values,
                     df.index,
                     name[i],
-                    asset[i],
+                    col_series_groups,
                     time_series_type,
                     description
                 ))
             return all_time_series
-        
 
     @classmethod
     def save_from_dataframe(cls,
         df,
-        asset=None,
+        series_groups=None,
         time_series_type=None,
         name=None,
         description=None,
@@ -247,7 +284,7 @@ class TimeSeries(BaseModel):
         """
         time_series_objects = cls.from_dataframe(
             df,
-            asset,
+            series_groups,
             time_series_type,
             name,
             description,
@@ -260,15 +297,12 @@ class TimeSeries(BaseModel):
         else:
             time_series_objects.save()
         return True
-    
-        
+
     @classmethod
-    def build_time_series_object(cls, values, dates, time_series_name, asset, time_series_type, description=None):
+    def build_time_series_object(cls, values, dates, time_series_name, series_groups, time_series_type, description=None):
         """
         Build a TimeSeries object with DataPoint objects from provided values and dates.
         """
-        from app.models import DataPoint
-
         data_points = []
         for i in range(len(values)):
             data_points.append(DataPoint(date=dates[i], value=values[i]))
@@ -278,16 +312,23 @@ class TimeSeries(BaseModel):
         )
         if description is not None:
             ts.description = description
-        if isinstance(asset, Asset):
-            ts.asset = asset
-        else:
-            ts.asset_id = asset
         if isinstance(time_series_type, TimeSeriesType):
             ts.time_series_type = time_series_type
         else:
             ts.type_id = time_series_type
-        return ts
 
+        # Associate with SeriesGroups if provided
+        if series_groups:
+            if isinstance(series_groups, SeriesGroup):
+                ts.series_groups.append(series_groups)
+            elif isinstance(series_groups, list):
+                for sg in series_groups:
+                    if sg is not None:
+                        ts.series_groups.append(sg)
+            else:
+                raise ValueError("series_groups must be a SeriesGroup instance, list of SeriesGroup instances, or None")
+
+        return ts
 
 class DataPoint(BaseModel):
     __tablename__ = 'data_point'
@@ -298,7 +339,10 @@ class DataPoint(BaseModel):
     time_series_id = db.Column(db.Integer, db.ForeignKey('time_series.id'), nullable=False)
 
     date_create = db.Column(db.DateTime(timezone=True), server_default=func.now(), nullable=False)
-    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
+    date_update = db.Column(
+        db.DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False
+    )
 
     def __repr__(self):
         return f'<DataPoint {self.date}: {self.value}>'
@@ -309,6 +353,29 @@ class DataPoint(BaseModel):
         """
         if self.time_series:
             # Make sure the parent TimeSeries saves its dependencies too.
-            # This will also add the Asset, TimeSeriesType, and any other DataPoints.
+            # This will also add the SeriesGroups and any other DataPoints.
             self.time_series._save_dependencies(session)
             session.add(self.time_series)
+
+class TimeSeriesType(BaseModel):
+    __tablename__ = 'time_series_type'
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), nullable=False, unique=True)
+    description = db.Column(db.String(200))
+    time_series = db.relationship('TimeSeries', backref='time_series_type', lazy=True)
+
+    date_create = db.Column(
+        db.DateTime(timezone=True), server_default=func.now(),
+        nullable=False
+    )
+    date_update = db.Column(
+        db.DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False
+    )
+
+    __mapper_args__ = {
+        'polymorphic_identity': 'time_series_type',
+    }
+
+    def __repr__(self):
+        return f'<TimeSeriesType {self.name}>'

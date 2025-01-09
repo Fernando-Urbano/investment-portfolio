@@ -1,46 +1,40 @@
+# tests/fixtures.py
+
 import pytest
 import random
 import string
-from app.models import Asset, TimeSeriesType, TimeSeries, DataPoint
+from app.models import SeriesGroup, TimeSeriesType, TimeSeries, DataPoint
 import datetime
 import pandas as pd
 from app import db
 import numpy as np
 
-# tests/fixtures.py
 
 @pytest.fixture
-def create_asset_and_type(app):
+def create_seriesgroup_and_type(app):
     """
-    Fixture to create an Asset and a TimeSeriesType for testing.
-    Returns their IDs, rather than returning detached instances.
+    Fixture to create a SeriesGroup and a TimeSeriesType.
+    Returns the objects themselves.
     """
-    with app.app_context():
-        # Create a TimeSeriesType
-        tstype = TimeSeriesType(name="Price", description="Price Time Series")
-        db.session.add(tstype)
-        db.session.commit()
-
-        # Create an Asset
-        asset = Asset(name="AST", description="Test Asset", is_tradable=True)
-        db.session.add(asset)
-        db.session.commit()
-
-        return asset.id, tstype.id
+    seriesgroup = SeriesGroup(name="SG_Test", description="Test SeriesGroup", series_code="SG999")
+    tstype = TimeSeriesType(name="TestType", description="Test TimeSeriesType")
+    db.session.add_all([seriesgroup, tstype])
+    db.session.commit()
+    return seriesgroup, tstype
 
 @pytest.fixture
 def populate_test_db(app):
     """
     Fixture to populate the test database with initial data.
-    Accepts parameters for the number of assets and data points per time series.
+    Accepts parameters for the number of series groups and data points per time series.
     """
 
-    def _populate_test_db(num_assets=1, num_data_points=10, start_date=datetime.date(2020, 1, 1)):
+    def _populate_test_db(num_seriesgroups=3, num_data_points=5, start_date=datetime.date(2024, 1, 1)):
         """
         Internal function to populate the test database.
         
         Args:
-            num_assets (int): Number of assets to create.
+            num_seriesgroups (int): Number of SeriesGroups to create.
             num_data_points (int): Number of data points per time series.
             start_date (date or str): Start date for generating data points.
         """
@@ -84,26 +78,31 @@ def populate_test_db(app):
             db.session.add(time_series_type)
             db.session.commit()
 
-            # Generate the specified number of assets and time series
-            for _ in range(num_assets):
-                # Create a random asset
-                asset_name = generate_random_name()
-                asset = Asset(
-                    name=asset_name,
-                    description=f"{asset_name} Description",
-                    is_tradable=bool(random.getrandbits(1))
+            # Generate the specified number of SeriesGroups and time series
+            for _ in range(num_seriesgroups):
+                # Create a random SeriesGroup
+                seriesgroup_name = generate_random_name()
+                series_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+                seriesgroup = SeriesGroup(
+                    name=seriesgroup_name,
+                    description=f"{seriesgroup_name} Description",
+                    series_code=series_code
                 )
-                db.session.add(asset)
+                db.session.add(seriesgroup)
                 db.session.commit()
 
-                # Create a random time series for the asset
+                # Create a random TimeSeries for the SeriesGroup
                 time_series_name = generate_random_name()
                 time_series = TimeSeries(
-                    name=f"{asset_name} {time_series_name}",
+                    name=f"{seriesgroup_name} {time_series_name}",
                     type_id=time_series_type.id,
-                    asset_id=asset.id
+                    delta_type='pct'  # Assuming default or desired value
                 )
                 db.session.add(time_series)
+                db.session.commit()
+
+                # Associate TimeSeries with SeriesGroup
+                seriesgroup.series.append(time_series)
                 db.session.commit()
 
                 # Create random data points for the time series
