@@ -1,8 +1,15 @@
 # tests/conftest.py
 
 import pytest
-from app import create_app, db
+import sys
+import pandas as pd
 import os
+
+# Add the project root to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from app import create_app, db
+
 
 @pytest.fixture(scope='function')
 def app():
@@ -37,3 +44,11 @@ def runner(app):
     Create a CLI runner for the app.
     """
     return app.test_cli_runner()
+
+# Import fixtures from fixtures.py
+from .fixtures import (
+    populate_test_db,
+    sample_df_single_column,    
+    sample_df_multiple_columns,
+    create_asset_and_type  
+)

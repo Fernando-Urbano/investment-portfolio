@@ -71,5 +71,6 @@ if __name__ == "__main__":
     save_tree_output_to_file("scripts/tree_output.txt")
     scripts_to_file(".", ["py", "ini"], "Outer directory:", "scripts/migrations", ignore_files=["join_files.py", "README.md", "__pycache__"])
     scripts_to_file("app", ["py", "ini"], "App files:", "scripts/app")
-    scripts_to_file("migrations", ["py", "ini"], "Migrations:", "scripts/migrations")
+    scripts_to_file("tests", ["py", "ini"], "Test files:", "scripts/tests", ignore_files=["__pycache__"])
+    scripts_to_file("migrations", ["py", "ini"], "Migrations files:", "scripts/migrations")
     scripts_to_file("scripts", "txt", ALL_EXPLANATION, "scripts/all")
