@@ -4,6 +4,8 @@ App files:
 
 FILE NAME: app/models.py
 
+# app/models.py
+
 from app import db
 import pandas as pd
 from sqlalchemy.sql import func
@@ -15,6 +17,13 @@ seriesgroup_seriesbase = db.Table(
     'seriesgroup_seriesbase',
     db.Column('seriesgroup_id', db.Integer, db.ForeignKey('series_group.id'), primary_key=True),
     db.Column('seriesbase_id', db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
+)
+
+# Association table for many-to-many relationship between SeriesBase and Keyword
+seriesbase_keyword = db.Table(
+    'seriesbase_keyword',
+    db.Column('seriesbase_id', db.Integer, db.ForeignKey('series_base.id'), primary_key=True),
+    db.Column('keyword_id', db.Integer, db.ForeignKey('keyword.id'), primary_key=True)
 )
 
 class BaseModel(db.Model):
@@ -43,6 +52,22 @@ class BaseModel(db.Model):
         """
         pass
 
+class Keyword(BaseModel):
+    __tablename__ = 'keyword'
+    id = db.Column(db.Integer, primary_key=True)
+    word = db.Column(db.String(50), unique=True, nullable=False, index=True)
+
+    # Relationship to SeriesBase
+    series = db.relationship(
+        'SeriesBase',
+        secondary=seriesbase_keyword,
+        back_populates='keywords',
+        lazy='dynamic'
+    )
+
+    def __repr__(self):
+        return f'<Keyword {self.word}>'
+
 class SeriesBase(BaseModel):
     __tablename__ = 'series_base'
     id = db.Column(db.Integer, primary_key=True)
@@ -51,8 +76,35 @@ class SeriesBase(BaseModel):
     type = db.Column(db.String(50))  # Discriminator column
 
     date_create = db.Column(db.DateTime(timezone=True), server_default=func.now(), nullable=False)
-    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(),
-                            onupdate=func.now(), nullable=False)
+    date_update = db.Column(
+        db.DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False
+    )
+
+    def __init__(self, name, description=None, keywords=None, **kwargs):
+        """
+        Initializes a SeriesBase instance.
+
+        Parameters:
+        - name (str): The name of the series.
+        - description (str, optional): A description of the series.
+        - keywords (list of str, optional): A list of keyword strings to associate with the series.
+        - **kwargs: Additional keyword arguments for other fields.
+        """
+        super().__init__(**kwargs)
+        self.name = name
+        self.description = description
+        if keywords:
+            for keyword_word in keywords:
+                self.add_keyword(keyword_word)
+
+    # Many-to-Many relationship with Keyword
+    keywords = db.relationship(
+        'Keyword',
+        secondary=seriesbase_keyword,
+        back_populates='series',
+        lazy='dynamic'
+    )
 
     __mapper_args__ = {
         'polymorphic_identity': 'series_base',
@@ -63,17 +115,37 @@ class SeriesBase(BaseModel):
     def __repr__(self):
         return f'<SeriesBase {self.name}>'
 
+    def add_keyword(self, keyword_word):
+        """
+        Adds a keyword to the series. Creates the keyword if it doesn't exist.
+        """
+        keyword = Keyword.query.filter_by(word=keyword_word).first()
+        if not keyword:
+            keyword = Keyword(word=keyword_word)
+            db.session.add(keyword)
+        if not self.keywords.filter_by(word=keyword_word).first():
+            self.keywords.append(keyword)
+
+    def remove_keyword(self, keyword_word):
+        """
+        Removes a keyword from the series.
+        """
+        keyword = Keyword.query.filter_by(word=keyword_word).first()
+        if keyword and self.keywords.filter_by(word=keyword_word).first():
+            self.keywords.remove(keyword)
+
 class SeriesGroup(SeriesBase):
     __tablename__ = 'series_group'
     id = db.Column(db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
-    series_code = db.Column(db.String(10), nullable=False, unique=True)
+    series_group_code = db.Column(db.String(5), nullable=False, unique=True)  # Renamed and kept unique
 
     # Self-referential relationship for nested SeriesGroups
     parent_id = db.Column(db.Integer, db.ForeignKey('series_group.id'), nullable=True)
     children = db.relationship(
         'SeriesGroup',
         backref=db.backref('parent', remote_side=[id]),
-        lazy='dynamic'
+        lazy='dynamic',
+        foreign_keys=[parent_id]  # Explicitly specify foreign_keys
     )
 
     # Many-to-many relationship with SeriesBase (TimeSeries and SeriesGroup)
@@ -94,6 +166,7 @@ class SeriesGroup(SeriesBase):
 class TimeSeries(SeriesBase):
     __tablename__ = 'time_series'
     id = db.Column(db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
+    time_series_code = db.Column(db.String(10), nullable=False, unique=True)  # New unique field
     type_id = db.Column(db.Integer, db.ForeignKey('time_series_type.id'), nullable=False)
     delta_type = db.Column(db.String(10), nullable=True, default='pct')
 
@@ -168,7 +241,8 @@ class TimeSeries(SeriesBase):
         time_series_type=None,
         name=None,
         description=None,
-        date_column=None
+        date_column=None,
+        all_columns_have_same_series_groups=False
     ):
         """
         Creates one or more TimeSeries objects from a pandas DataFrame without saving to the database.
@@ -229,21 +303,38 @@ class TimeSeries(SeriesBase):
                     raise ValueError("SeriesGroups must be provided as list, string, or SeriesGroup instances")
                     
                 if len(series_groups) != len(df.columns):
-                    raise ValueError("SeriesGroups list must match the number of columns in the DataFrame.")
+                    if not all_columns_have_same_series_groups:
+                        raise ValueError(
+                            "SeriesGroups list must match the number of columns in the DataFrame or "
+                            + "parameter 'all_columns_have_same_series_groups=True'."
+                        )
             else:
                 series_groups = [None] * len(df.columns)  # No groups associated
 
             if isinstance(description, str) and description is not None:
                 raise ValueError("Description must be a list if multiple columns are provided.")
             
+            if not all([g is None for g in series_groups]) and all_columns_have_same_series_groups:
+                all_columns_have_same_series_groups = True
+                col_series_groups = series_groups
+            else:
+                all_columns_have_same_series_groups = False
+
+
+            all_columns_have_same_series_groups = (
+                False if all([g is None for g in series_groups]) else all_columns_have_same_series_groups
+            )
+
             all_time_series = []
             for i, col in enumerate(df.columns):
+                if not all_columns_have_same_series_groups:
+                    col_series_groups = series_groups[i]
                 all_time_series.append(
                     cls.build_time_series_object(
                     df[col].values,
                     df.index,
                     name[i],
-                    series_groups[i],
+                    col_series_groups,
                     time_series_type,
                     description
                 ))
@@ -342,7 +433,6 @@ class DataPoint(BaseModel):
             self.time_series._save_dependencies(session)
             session.add(self.time_series)
 
-
 class TimeSeriesType(BaseModel):
     __tablename__ = 'time_series_type'
     id = db.Column(db.Integer, primary_key=True)
@@ -365,7 +455,6 @@ class TimeSeriesType(BaseModel):
 
     def __repr__(self):
         return f'<TimeSeriesType {self.name}>'
-
 
 ================================================================================
 

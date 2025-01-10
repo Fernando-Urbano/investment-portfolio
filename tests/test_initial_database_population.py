@@ -21,8 +21,8 @@ def test_initial_population(populate_test_db):
     for sg in SeriesGroup.query.all():
         assert len(sg.name) == 3, f"SeriesGroup name '{sg.name}' should have exactly three characters."
         assert sg.description.endswith("Description"), f"SeriesGroup description mismatch for '{sg.name}'."
-        assert sg.series_code is not None and len(sg.series_code) == 5, (
-            f"SeriesGroup '{sg.name}' should have a valid series_code of length 5."
+        assert sg.series_group_code is not None and len(sg.series_group_code) == 5, (
+            f"SeriesGroup '{sg.name}' should have a valid series_group_code of length 5."
         )
 
     # Retrieve and check the TimeSeriesType

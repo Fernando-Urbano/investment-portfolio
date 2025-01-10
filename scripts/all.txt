@@ -31,15 +31,16 @@ FILE NAME: scripts/tree_output.txt
     │   ├── conftest.cpython-312-pytest-8.3.4.pyc
     │   ├── fixtures.cpython-312.pyc
     │   ├── test_initial_database_population.cpython-312-pytest-8.3.4.pyc
+    │   ├── test_save_models.cpython-312-pytest-8.3.4.pyc
     │   ├── test_save_modules.cpython-312-pytest-8.3.4.pyc
     │   └── test_timeseries.cpython-312-pytest-8.3.4.pyc
     ├── conftest.py
     ├── fixtures.py
     ├── test_initial_database_population.py
-    ├── test_save_modules.py
+    ├── test_save_models.py
     └── test_timeseries.py
 
-9 directories, 25 files
+9 directories, 26 files
 
 
 ================================================================================
@@ -95,12 +96,14 @@ def app():
         db.session.remove()
         db.drop_all()
 
+
 @pytest.fixture(scope='function')
 def client(app):
     """
     Create a test client for the app.
     """
     return app.test_client()
+
 
 @pytest.fixture(scope='function')
 def runner(app):
@@ -109,44 +112,43 @@ def runner(app):
     """
     return app.test_cli_runner()
 
+
 # Import fixtures from fixtures.py
 from .fixtures import (
     populate_test_db,
     sample_df_single_column,    
     sample_df_multiple_columns,
-    create_asset_and_type  
+    create_seriesgroup_and_type  # Updated fixture name
 )
 
 ================================================================================
 
 FILE NAME: tests/test_timeseries.py
 
+# tests/test_timeseries.py
+
 import pytest
 import datetime
 import pandas as pd
-from app.models import TimeSeries, DataPoint, Asset, TimeSeriesType
+from app.models import TimeSeries, DataPoint, SeriesGroup, TimeSeriesType
 from app import db  # Import db for database operations
 
 
 def test_from_dataframe_single_column(
     app,
     sample_df_single_column,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
     Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
 
     with app.app_context():
-        # Re-query Asset and TimeSeriesType to ensure they're attached to the current session
-        asset = db.session.get(Asset, asset_id)
-        tstype = db.session.get(TimeSeriesType, tstype_id)
-
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
-            asset=asset,
-            time_series_type=tstype
+            series_groups=[seriesgroup],  # Pass as a list of objects
+            time_series_type=tstype  # Assign the object directly
         )
 
         # Expect a single TimeSeries (not a list)
@@ -162,21 +164,21 @@ def test_from_dataframe_single_column(
             assert dp.value == expected_value, f"Expected value {expected_value}, got {dp.value}"
 
 
-def test_from_dataframe_single_column_with_asset_id_and_tstype_id(
+def test_from_dataframe_single_column_with_seriesgroup_and_tstype(
     app,
     sample_df_single_column,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
     Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
 
     with app.app_context():
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
-            asset=asset_id,
-            time_series_type=tstype_id
+            series_groups=[seriesgroup],  # Pass as a list of objects
+            time_series_type=tstype  # Assign the object directly
         )
 
         # Expect a single TimeSeries (not a list)
@@ -195,22 +197,22 @@ def test_from_dataframe_single_column_with_asset_id_and_tstype_id(
 def test_from_dataframe_single_column_with_date_as_column(
     app,
     sample_df_single_column,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
-    Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries.
+    Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries with a specified date column.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
 
-    sample_df = sample_df_single_column
+    sample_df = sample_df_single_column.copy()
     sample_df["Datetime"] = sample_df.index
     sample_df = sample_df.reset_index(drop=True)
 
     with app.app_context():
         ts_obj = TimeSeries.from_dataframe(
-            df=sample_df_single_column,
-            asset=asset_id,
-            time_series_type=tstype_id,
+            df=sample_df,
+            series_groups=[seriesgroup],  # Pass as a list of objects
+            time_series_type=tstype,  # Assign the object directly
             date_column="Datetime"
         )
 
@@ -221,8 +223,8 @@ def test_from_dataframe_single_column_with_date_as_column(
 
         # Check the data points
         for i, dp in enumerate(ts_obj.data_points):
-            expected_date = sample_df_single_column.index[i].date()
-            expected_value = sample_df_single_column["price"].iloc[i]
+            expected_date = sample_df["Datetime"][i].date()
+            expected_value = sample_df["price"].iloc[i]
             assert dp.date.date() == expected_date, f"Expected date {expected_date}, got {dp.date}"
             assert dp.value == expected_value, f"Expected value {expected_value}, got {dp.value}"
 
@@ -230,19 +232,23 @@ def test_from_dataframe_single_column_with_date_as_column(
 def test_from_dataframe_multi_column(
     app,
     sample_df_multiple_columns,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
     Test that from_dataframe handles a multi-column DataFrame and returns multiple TimeSeries.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
     num_columns = len(sample_df_multiple_columns.columns)
 
     with app.app_context():
+        # Since there are multiple columns, provide a list of SeriesGroup objects
+        # For simplicity, using the same SeriesGroup for all columns
+        series_groups = [seriesgroup for _ in range(num_columns)]
+
         ts_objs = TimeSeries.from_dataframe(
             df=sample_df_multiple_columns,
-            asset=asset_id,
-            time_series_type=tstype_id
+            series_groups=series_groups,  # Pass as a list of objects
+            time_series_type=tstype  # Assign the object directly
         )
 
         # Expect a list of TimeSeries objects
@@ -255,18 +261,22 @@ def test_from_dataframe_multi_column(
 def test_to_dataframe_multi_column(
     app,
     sample_df_multiple_columns,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
-    Test that from_dataframe handles a multi-column DataFrame and returns multiple TimeSeries.
+    Test that from_dataframe handles a multi-column DataFrame and the resulting TimeSeries can be converted back to DataFrame.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
 
     with app.app_context():
+        # Provide a list of SeriesGroup objects matching the number of columns
+        num_columns = len(sample_df_multiple_columns.columns)
+        series_groups = [seriesgroup for _ in range(num_columns)]
+
         ts_objs = TimeSeries.from_dataframe(
             df=sample_df_multiple_columns,
-            asset=asset_id,
-            time_series_type=tstype_id
+            series_groups=series_groups,  # Pass as a list of objects
+            time_series_type=tstype  # Assign the object directly
         )
         for ts_obj in ts_objs:
             ts_dataframe = ts_obj.to_dataframe()
@@ -277,18 +287,18 @@ def test_to_dataframe_multi_column(
 def test_to_dataframe_single_column(
     app,
     sample_df_single_column,
-    create_asset_and_type
+    create_seriesgroup_and_type  # Updated fixture name
 ):
     """
-    Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries.
+    Test that from_dataframe handles a single-column DataFrame and returns one TimeSeries, which can be converted back to DataFrame.
     """
-    asset_id, tstype_id = create_asset_and_type
+    seriesgroup, tstype = create_seriesgroup_and_type
 
     with app.app_context():
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
-            asset=asset_id,
-            time_series_type=tstype_id
+            series_groups=[seriesgroup],  # Pass as a list of objects
+            time_series_type=tstype  # Assign the object directly
         )
 
         ts_dataframe = ts_obj.to_dataframe()
@@ -298,36 +308,36 @@ def test_to_dataframe_single_column(
         for i in range(5):
             assert ts_dataframe.iloc[i, 0] == sample_df_single_column.iloc[i, 0], "DataFrame values should match the input DataFrame."
 
-
-    
-
 ================================================================================
 
 FILE NAME: tests/test_initial_database_population.py
 
-# tests/test_initial_population.py
+# tests/test_initial_database_population.py
 
-from app.models import Asset, TimeSeriesType, TimeSeries, DataPoint
+import pytest
+from app.models import SeriesGroup, TimeSeriesType, TimeSeries, DataPoint
 import datetime
 
 def test_initial_population(populate_test_db):
     """
     Test the initial population of the test database by verifying the created entries.
     """
-    # Populate the database with 3 assets and 5 data points per time series
-    populate_test_db(num_assets=3, num_data_points=5, start_date="2024-01-01")
+    # Populate the database with 3 SeriesGroups and 5 data points per time series
+    populate_test_db(num_seriesgroups=3, num_data_points=5, start_date="2024-01-01")
 
     # Verify the number of entries created
-    assert Asset.query.count() == 3, "There should be exactly 3 Assets."
+    assert SeriesGroup.query.count() == 3, "There should be exactly 3 SeriesGroups."
     assert TimeSeriesType.query.count() == 1, "There should be exactly one TimeSeriesType."
-    assert TimeSeries.query.count() == 3, "Each Asset should have exactly one TimeSeries."
+    assert TimeSeries.query.count() == 3, "There should be exactly three TimeSeries."
     assert DataPoint.query.count() == 15, "Each TimeSeries should have 5 DataPoints."
 
-    # Retrieve and check the Assets
-    for asset in Asset.query.all():
-        assert len(asset.name) == 3, f"Asset name '{asset.name}' should have exactly three characters."
-        assert asset.description.endswith("Description"), f"Asset description mismatch for '{asset.name}'."
-        assert isinstance(asset.is_tradable, bool), f"Asset '{asset.name}' should have a boolean value for 'is_tradable'."
+    # Retrieve and check the SeriesGroups
+    for sg in SeriesGroup.query.all():
+        assert len(sg.name) == 3, f"SeriesGroup name '{sg.name}' should have exactly three characters."
+        assert sg.description.endswith("Description"), f"SeriesGroup description mismatch for '{sg.name}'."
+        assert sg.series_group_code is not None and len(sg.series_group_code) == 5, (
+            f"SeriesGroup '{sg.name}' should have a valid series_group_code of length 5."
+        )
 
     # Retrieve and check the TimeSeriesType
     time_series_type = TimeSeriesType.query.first()
@@ -338,7 +348,12 @@ def test_initial_population(populate_test_db):
     for time_series in TimeSeries.query.all():
         assert len(time_series.name) > 0, "TimeSeries name should not be empty."
         assert time_series.type_id == time_series_type.id, "TimeSeries type_id mismatch."
-        assert time_series.asset_id in [asset.id for asset in Asset.query.all()], "TimeSeries asset_id mismatch."
+
+        # Ensure each TimeSeries is associated with at least one SeriesGroup
+        associated_sg_ids = [sg.id for sg in time_series.series_groups]
+        assert len(associated_sg_ids) >= 1, (
+            f"TimeSeries '{time_series.name}' should be associated with at least one SeriesGroup."
+        )
 
         data_points = time_series.data_points
         assert len(data_points) == 5, f"TimeSeries '{time_series.name}' should have exactly 5 DataPoints."
@@ -347,14 +362,19 @@ def test_initial_population(populate_test_db):
         start_date = datetime.date(2024, 1, 1)
         for i, dp in enumerate(data_points):
             expected_date = start_date + datetime.timedelta(days=i)
-            assert dp.date == expected_date, f"DataPoint date mismatch: expected {expected_date}, got {dp.date}."
+            assert dp.date == expected_date, (
+                f"DataPoint date mismatch: expected {expected_date}, got {dp.date}."
+            )
             assert isinstance(dp.value, float), "DataPoint 'value' should be a float."
-            assert dp.time_series_id == time_series.id, f"DataPoint time_series_id mismatch for {dp}."
+            assert dp.time_series_id == time_series.id, (
+                f"DataPoint time_series_id mismatch for DataPoint ID {dp.id}."
+            )
 
             # Check `date_release` conditionally
             if dp.date_release:
-                assert dp.date_release == dp.date + datetime.timedelta(days=1), (
-                    f"DataPoint 'date_release' mismatch: expected {dp.date + datetime.timedelta(days=1)}, got {dp.date_release}."
+                expected_release_date = dp.date + datetime.timedelta(days=1)
+                assert dp.date_release == expected_release_date, (
+                    f"DataPoint 'date_release' mismatch: expected {expected_release_date}, got {dp.date_release}."
                 )
 
 ================================================================================
@@ -365,26 +385,29 @@ FILE NAME: tests/__init__.py
 
 ================================================================================
 
-FILE NAME: tests/test_save_modules.py
+FILE NAME: tests/test_save_models.py
+
+# tests/test_save_models.py
 
 import pytest
 import datetime
 from app import db
-from app.models import Asset, TimeSeriesType, TimeSeries, DataPoint
+from app.models import SeriesGroup, TimeSeriesType, TimeSeries, DataPoint
 
-def test_save_asset(app):
+def test_save_seriesgroup(app):
     """
-    Test saving a standalone Asset to the database using the `save` method.
+    Test saving a standalone SeriesGroup to the database using the `save` method.
     """
-    asset = Asset(name="AST", description="Test Asset", is_tradable=True)
-    asset.save()  # or db.session.add(asset); db.session.commit()
+    seriesgroup = SeriesGroup(name="SG1", description="Test SeriesGroup", series_code="SG001")
+    seriesgroup.save()  # or db.session.add(seriesgroup); db.session.commit()
 
-    assert asset.id is not None, "Asset ID should be generated after saving."
-    assert Asset.query.count() == 1, "Exactly one Asset should exist in the database."
+    assert seriesgroup.id is not None, "SeriesGroup ID should be generated after saving."
+    assert SeriesGroup.query.count() == 1, "Exactly one SeriesGroup should exist in the database."
 
-    retrieved = Asset.query.first()
-    assert retrieved.name == "AST", "Retrieved Asset name should match 'AST'."
-    assert retrieved.is_tradable is True, "Asset should be marked as tradable."
+    retrieved = SeriesGroup.query.first()
+    assert retrieved.name == "SG1", "Retrieved SeriesGroup name should match 'SG1'."
+    assert retrieved.description == "Test SeriesGroup", "SeriesGroup description should match."
+    assert retrieved.series_code == "SG001", "SeriesGroup series_code should match 'SG001'."
 
 def test_save_time_series_type(app):
     """
@@ -398,50 +421,58 @@ def test_save_time_series_type(app):
 
     retrieved = TimeSeriesType.query.first()
     assert retrieved.name == "Price", "Retrieved name should be 'Price'."
+    assert retrieved.description == "Price Time Series", "TimeSeriesType description mismatch."
 
 def test_save_time_series_with_dependencies(app):
     """
-    Test saving a TimeSeries that depends on an Asset and a TimeSeriesType.
+    Test saving a TimeSeries that depends on a SeriesGroup and a TimeSeriesType.
     Verifies the parent objects can be saved together if they're new.
     """
-    asset = Asset(name="AST2", description="Second Asset", is_tradable=False)
+    seriesgroup = SeriesGroup(name="SG2", description="Second SeriesGroup", series_code="SG002")
     tstype = TimeSeriesType(name="Volume", description="Volume Time Series")
 
     ts = TimeSeries(
         name="TS-Test",
-        asset=asset,
-        time_series_type=tstype
+        time_series_type=tstype  # Correct: Assign the object, not the ID
     )
-    # If you have a custom save method that cascades, this will save asset & tstype, too.
-    ts.save()
+    ts.series_groups.append(seriesgroup)
+
+    ts.save()  # Should save ts, seriesgroup & tstype, too.
 
     # Verify TimeSeries
     assert ts.id is not None, "TimeSeries ID should be set after saving."
     assert TimeSeries.query.count() == 1, "One TimeSeries should exist."
 
-    # Verify Asset
-    assert asset.id is not None, "Asset ID should be set after saving TimeSeries."
-    assert Asset.query.count() == 1, "One Asset should exist."
+    # Verify SeriesGroup
+    assert seriesgroup.id is not None, "SeriesGroup ID should be set after saving TimeSeries."
+    assert SeriesGroup.query.count() == 1, "One SeriesGroup should exist."
 
     # Verify TimeSeriesType
     assert tstype.id is not None, "TimeSeriesType ID should be set after saving TimeSeries."
     assert TimeSeriesType.query.count() == 1, "One TimeSeriesType should exist."
+    
+    # Additionally, check that the association is correct
+    retrieved_ts = TimeSeries.query.first()
+    associated_sgs = retrieved_ts.series_groups.all()
+    assert len(associated_sgs) == 1, "TimeSeries should be associated with one SeriesGroup."
+    assert associated_sgs[0].id == seriesgroup.id, "Associated SeriesGroup should match the created one."
 
 def test_save_data_points_with_timeseries(app):
     """
     Test saving a TimeSeries along with multiple DataPoints.
     Ensures child DataPoints are also saved.
     """
-    asset = Asset(name="AST3", description="Third Asset", is_tradable=True)
+    seriesgroup = SeriesGroup(name="SG3", description="Third SeriesGroup", series_code="SG003")
     tstype = TimeSeriesType(name="Price", description="Price Time Series")
 
-    ts = TimeSeries(name="TS-DataPoints", asset=asset, time_series_type=tstype)
+    ts = TimeSeries(name="TS-DataPoints", time_series_type=tstype)  # Correct assignment
+    ts.series_groups.append(seriesgroup)
 
     dp1 = DataPoint(date=datetime.date(2025, 1, 10), value=4000.0)
     dp2 = DataPoint(date=datetime.date(2025, 1, 11), value=4050.5)
     ts.data_points.extend([dp1, dp2])
 
-    ts.save()  # Should save ts, asset, tstype, and dp1/dp2
+    ts.save()  # Should save ts, seriesgroup, tstype, and dp1/dp2
 
     # Verify
     assert TimeSeries.query.count() == 1, "One TimeSeries should be saved."
@@ -449,41 +480,54 @@ def test_save_data_points_with_timeseries(app):
 
     retrieved_ts = TimeSeries.query.first()
     assert len(retrieved_ts.data_points) == 2, "Retrieved TimeSeries should have 2 DataPoints."
+    
+    # Verify SeriesGroup association
+    associated_sgs = retrieved_ts.series_groups.all()
+    assert len(associated_sgs) == 1, "TimeSeries should be associated with one SeriesGroup."
+    assert associated_sgs[0].id == seriesgroup.id, "Associated SeriesGroup should match the created one."
 
 def test_save_datapoint_alone_with_parents(app):
     """
     Test saving a single DataPoint that has a reference to a new TimeSeries,
-    which references a new Asset and TimeSeriesType. All should be saved.
+    which references a new SeriesGroup and TimeSeriesType. All should be saved.
     """
-    asset = Asset(name="AST4", description="Fourth Asset")
+    seriesgroup = SeriesGroup(name="SG4", description="Fourth SeriesGroup", series_code="SG004")
     tstype = TimeSeriesType(name="Bids", description="Bid Time Series")
-    ts = TimeSeries(name="TS-Bids", asset=asset, time_series_type=tstype)
+    ts = TimeSeries(name="TS-Bids", time_series_type=tstype)  # Correct assignment
+    ts.series_groups.append(seriesgroup)
 
     dp = DataPoint(date=datetime.date(2025, 1, 12), value=5001.5, time_series=ts)
-    dp.save()  # Should cascade and save dp, ts, asset, tstype
+    dp.save()  # Should cascade and save dp, ts, seriesgroup, tstype
 
     assert dp.id is not None, "DataPoint should have an ID after saving."
-    assert asset.id is not None, "Asset should be saved."
+    assert seriesgroup.id is not None, "SeriesGroup should be saved."
     assert tstype.id is not None, "TimeSeriesType should be saved."
     assert ts.id is not None, "TimeSeries should be saved."
 
     # Verify counts
-    assert Asset.query.count() == 1, "Exactly one Asset should be in DB."
+    assert SeriesGroup.query.count() == 1, "Exactly one SeriesGroup should be in DB."
     assert TimeSeriesType.query.count() == 1, "Exactly one TimeSeriesType should be in DB."
     assert TimeSeries.query.count() == 1, "Exactly one TimeSeries should be in DB."
     assert DataPoint.query.count() == 1, "Exactly one DataPoint should be in DB."
+
+    # Optionally, verify the association
+    retrieved_ts = TimeSeries.query.first()
+    associated_sgs = retrieved_ts.series_groups.all()
+    assert len(associated_sgs) == 1, "TimeSeries should be associated with one SeriesGroup."
+    assert associated_sgs[0].id == seriesgroup.id, "Associated SeriesGroup should match the created one."
 
 def test_save_multiple_objects_in_one_session(app):
     """
     Test saving multiple objects in one transaction without committing until the end.
     """
-    asset = Asset(name="AST5", description="Fifth Asset", is_tradable=False)
+    seriesgroup = SeriesGroup(name="SG5", description="Fifth SeriesGroup", series_code="SG005")
     tstype = TimeSeriesType(name="Spread", description="Spread Time Series")
-    ts = TimeSeries(name="TS-Spread", asset=asset, time_series_type=tstype)
+    ts = TimeSeries(name="TS-Spread", time_series_type=tstype)  # Correct assignment
+    ts.series_groups.append(seriesgroup)
     dp = DataPoint(date=datetime.date(2025, 1, 13), value=3999.9, time_series=ts)
 
     # Manually pass commit=False to gather them in the session, then commit once
-    asset.save(commit=False)
+    seriesgroup.save(commit=False)
     tstype.save(commit=False)
     ts.save(commit=False)
     dp.save(commit=False)
@@ -492,7 +536,7 @@ def test_save_multiple_objects_in_one_session(app):
     db.session.commit()
 
     # Verify
-    assert Asset.query.count() == 1, "Exactly one Asset should be saved."
+    assert SeriesGroup.query.count() == 1, "Exactly one SeriesGroup should be saved."
     assert TimeSeriesType.query.count() == 1, "Exactly one TimeSeriesType should be saved."
     assert TimeSeries.query.count() == 1, "Exactly one TimeSeries should be saved."
     assert DataPoint.query.count() == 1, "Exactly one DataPoint should be saved."
@@ -501,120 +545,47 @@ def test_save_multiple_objects_in_one_session(app):
     assert retrieved_dp.value == 3999.9, "DataPoint value should be as assigned."
     assert retrieved_dp.time_series.name == "TS-Spread", "DataPoint should link to the correct TimeSeries."
 
-
-# tests/test_exception_cases.py
-
-import pytest
-from sqlalchemy.exc import IntegrityError
-from app import db
-from app.models import TimeSeriesType, TimeSeries, Asset, DataPoint
-import pandas as pd
-
-def test_timeseries_type_duplicate_name_raises(app):
-    """
-    Verify that creating two TimeSeriesType objects with the same name
-    (where name is unique) raises an IntegrityError.
-    """
-    # First TimeSeriesType
-    tstype1 = TimeSeriesType(name="UniqueName", description="First Type")
-    db.session.add(tstype1)
-    db.session.commit()
-
-    # Second TimeSeriesType with the same name
-    tstype2 = TimeSeriesType(name="UniqueName", description="Second Type")
-    db.session.add(tstype2)
-
-    # Expect an IntegrityError upon commit
-    with pytest.raises(IntegrityError):
-        db.session.commit()
-
-def test_timeseries_invalid_dataframe_raises(app):
-    """
-    Verify that TimeSeries.from_dataframe raises ValueError
-    if the DataFrame doesn't have a proper date column/index.
-    """
-    # Create a minimal DataFrame that lacks a datetime column/index
-    df = pd.DataFrame({
-        "some_column": [1, 2, 3]
-    })
-
-    # Create required objects
-    asset = Asset(name="AST", description="Asset for test", is_tradable=True)
-    db.session.add(asset)
-    db.session.commit()
-
-    tstype = TimeSeriesType(name="Price", description="Price Time Series")
-    db.session.add(tstype)
-    db.session.commit()
-
-    # Attempt to create a TimeSeries from a DataFrame with no date
-    try:
-        ts = TimeSeries.from_dataframe(
-            df=df,
-            time_series_type=tstype.id,
-            asset=asset.id
-            # Not passing date_column because we expect the index to be a datetime or raise ValueError
-        )
-        raise AssertionError("Expected ValueError for missing date column but got no exception")
-    except ValueError:
-        pass
-    except AssertionError as e:
-        raise e
-    except Exception as e:
-        raise AssertionError(f"Expected ValueError for missing date column but got exception of type {type(e)}")
-
-
-
-if __name__ == "__main__":
-    test_timeseries_invalid_dataframe_raises()
-
 ================================================================================
 
 FILE NAME: tests/fixtures.py
 
+# tests/fixtures.py
+
 import pytest
 import random
 import string
-from app.models import Asset, TimeSeriesType, TimeSeries, DataPoint
+from app.models import SeriesGroup, TimeSeriesType, TimeSeries, DataPoint
 import datetime
 import pandas as pd
 from app import db
 import numpy as np
 
-# tests/fixtures.py
 
 @pytest.fixture
-def create_asset_and_type(app):
+def create_seriesgroup_and_type(app):
     """
-    Fixture to create an Asset and a TimeSeriesType for testing.
-    Returns their IDs, rather than returning detached instances.
+    Fixture to create a SeriesGroup and a TimeSeriesType.
+    Returns the objects themselves.
     """
-    with app.app_context():
-        # Create a TimeSeriesType
-        tstype = TimeSeriesType(name="Price", description="Price Time Series")
-        db.session.add(tstype)
-        db.session.commit()
-
-        # Create an Asset
-        asset = Asset(name="AST", description="Test Asset", is_tradable=True)
-        db.session.add(asset)
-        db.session.commit()
-
-        return asset.id, tstype.id
+    seriesgroup = SeriesGroup(name="SG_Test", description="Test SeriesGroup", series_group_code="SG999")
+    tstype = TimeSeriesType(name="TestType", description="Test TimeSeriesType")
+    db.session.add_all([seriesgroup, tstype])
+    db.session.commit()
+    return seriesgroup, tstype
 
 @pytest.fixture
 def populate_test_db(app):
     """
     Fixture to populate the test database with initial data.
-    Accepts parameters for the number of assets and data points per time series.
+    Accepts parameters for the number of series groups and data points per time series.
     """
 
-    def _populate_test_db(num_assets=1, num_data_points=10, start_date=datetime.date(2020, 1, 1)):
+    def _populate_test_db(num_seriesgroups=3, num_data_points=5, start_date=datetime.date(2024, 1, 1)):
         """
         Internal function to populate the test database.
         
         Args:
-            num_assets (int): Number of assets to create.
+            num_seriesgroups (int): Number of SeriesGroups to create.
             num_data_points (int): Number of data points per time series.
             start_date (date or str): Start date for generating data points.
         """
@@ -658,26 +629,31 @@ def populate_test_db(app):
             db.session.add(time_series_type)
             db.session.commit()
 
-            # Generate the specified number of assets and time series
-            for _ in range(num_assets):
-                # Create a random asset
-                asset_name = generate_random_name()
-                asset = Asset(
-                    name=asset_name,
-                    description=f"{asset_name} Description",
-                    is_tradable=bool(random.getrandbits(1))
+            # Generate the specified number of SeriesGroups and time series
+            for _ in range(num_seriesgroups):
+                # Create a random SeriesGroup
+                seriesgroup_name = generate_random_name()
+                series_group_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+                seriesgroup = SeriesGroup(
+                    name=seriesgroup_name,
+                    description=f"{seriesgroup_name} Description",
+                    series_group_code=series_group_code
                 )
-                db.session.add(asset)
+                db.session.add(seriesgroup)
                 db.session.commit()
 
-                # Create a random time series for the asset
+                # Create a random TimeSeries for the SeriesGroup
                 time_series_name = generate_random_name()
                 time_series = TimeSeries(
-                    name=f"{asset_name} {time_series_name}",
+                    name=f"{seriesgroup_name} {time_series_name}",
                     type_id=time_series_type.id,
-                    asset_id=asset.id
+                    delta_type='pct'  # Assuming default or desired value
                 )
                 db.session.add(time_series)
+                db.session.commit()
+
+                # Associate TimeSeries with SeriesGroup
+                seriesgroup.series.append(time_series)
                 db.session.commit()
 
                 # Create random data points for the time series
@@ -724,6 +700,8 @@ App files:
 
 FILE NAME: app/models.py
 
+# app/models.py
+
 from app import db
 import pandas as pd
 from sqlalchemy.sql import func
@@ -735,6 +713,13 @@ seriesgroup_seriesbase = db.Table(
     'seriesgroup_seriesbase',
     db.Column('seriesgroup_id', db.Integer, db.ForeignKey('series_group.id'), primary_key=True),
     db.Column('seriesbase_id', db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
+)
+
+# Association table for many-to-many relationship between SeriesBase and Keyword
+seriesbase_keyword = db.Table(
+    'seriesbase_keyword',
+    db.Column('seriesbase_id', db.Integer, db.ForeignKey('series_base.id'), primary_key=True),
+    db.Column('keyword_id', db.Integer, db.ForeignKey('keyword.id'), primary_key=True)
 )
 
 class BaseModel(db.Model):
@@ -763,6 +748,22 @@ class BaseModel(db.Model):
         """
         pass
 
+class Keyword(BaseModel):
+    __tablename__ = 'keyword'
+    id = db.Column(db.Integer, primary_key=True)
+    word = db.Column(db.String(50), unique=True, nullable=False, index=True)
+
+    # Relationship to SeriesBase
+    series = db.relationship(
+        'SeriesBase',
+        secondary=seriesbase_keyword,
+        back_populates='keywords',
+        lazy='dynamic'
+    )
+
+    def __repr__(self):
+        return f'<Keyword {self.word}>'
+
 class SeriesBase(BaseModel):
     __tablename__ = 'series_base'
     id = db.Column(db.Integer, primary_key=True)
@@ -771,8 +772,35 @@ class SeriesBase(BaseModel):
     type = db.Column(db.String(50))  # Discriminator column
 
     date_create = db.Column(db.DateTime(timezone=True), server_default=func.now(), nullable=False)
-    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(),
-                            onupdate=func.now(), nullable=False)
+    date_update = db.Column(
+        db.DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False
+    )
+
+    def __init__(self, name, description=None, keywords=None, **kwargs):
+        """
+        Initializes a SeriesBase instance.
+
+        Parameters:
+        - name (str): The name of the series.
+        - description (str, optional): A description of the series.
+        - keywords (list of str, optional): A list of keyword strings to associate with the series.
+        - **kwargs: Additional keyword arguments for other fields.
+        """
+        super().__init__(**kwargs)
+        self.name = name
+        self.description = description
+        if keywords:
+            for keyword_word in keywords:
+                self.add_keyword(keyword_word)
+
+    # Many-to-Many relationship with Keyword
+    keywords = db.relationship(
+        'Keyword',
+        secondary=seriesbase_keyword,
+        back_populates='series',
+        lazy='dynamic'
+    )
 
     __mapper_args__ = {
         'polymorphic_identity': 'series_base',
@@ -783,17 +811,37 @@ class SeriesBase(BaseModel):
     def __repr__(self):
         return f'<SeriesBase {self.name}>'
 
+    def add_keyword(self, keyword_word):
+        """
+        Adds a keyword to the series. Creates the keyword if it doesn't exist.
+        """
+        keyword = Keyword.query.filter_by(word=keyword_word).first()
+        if not keyword:
+            keyword = Keyword(word=keyword_word)
+            db.session.add(keyword)
+        if not self.keywords.filter_by(word=keyword_word).first():
+            self.keywords.append(keyword)
+
+    def remove_keyword(self, keyword_word):
+        """
+        Removes a keyword from the series.
+        """
+        keyword = Keyword.query.filter_by(word=keyword_word).first()
+        if keyword and self.keywords.filter_by(word=keyword_word).first():
+            self.keywords.remove(keyword)
+
 class SeriesGroup(SeriesBase):
     __tablename__ = 'series_group'
     id = db.Column(db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
-    series_code = db.Column(db.String(10), nullable=False, unique=True)
+    series_group_code = db.Column(db.String(5), nullable=False, unique=True)  # Renamed and kept unique
 
     # Self-referential relationship for nested SeriesGroups
     parent_id = db.Column(db.Integer, db.ForeignKey('series_group.id'), nullable=True)
     children = db.relationship(
         'SeriesGroup',
         backref=db.backref('parent', remote_side=[id]),
-        lazy='dynamic'
+        lazy='dynamic',
+        foreign_keys=[parent_id]  # Explicitly specify foreign_keys
     )
 
     # Many-to-many relationship with SeriesBase (TimeSeries and SeriesGroup)
@@ -814,6 +862,7 @@ class SeriesGroup(SeriesBase):
 class TimeSeries(SeriesBase):
     __tablename__ = 'time_series'
     id = db.Column(db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
+    time_series_code = db.Column(db.String(10), nullable=False, unique=True)  # New unique field
     type_id = db.Column(db.Integer, db.ForeignKey('time_series_type.id'), nullable=False)
     delta_type = db.Column(db.String(10), nullable=True, default='pct')
 
@@ -888,7 +937,8 @@ class TimeSeries(SeriesBase):
         time_series_type=None,
         name=None,
         description=None,
-        date_column=None
+        date_column=None,
+        all_columns_have_same_series_groups=False
     ):
         """
         Creates one or more TimeSeries objects from a pandas DataFrame without saving to the database.
@@ -949,21 +999,38 @@ class TimeSeries(SeriesBase):
                     raise ValueError("SeriesGroups must be provided as list, string, or SeriesGroup instances")
                     
                 if len(series_groups) != len(df.columns):
-                    raise ValueError("SeriesGroups list must match the number of columns in the DataFrame.")
+                    if not all_columns_have_same_series_groups:
+                        raise ValueError(
+                            "SeriesGroups list must match the number of columns in the DataFrame or "
+                            + "parameter 'all_columns_have_same_series_groups=True'."
+                        )
             else:
                 series_groups = [None] * len(df.columns)  # No groups associated
 
             if isinstance(description, str) and description is not None:
                 raise ValueError("Description must be a list if multiple columns are provided.")
             
+            if not all([g is None for g in series_groups]) and all_columns_have_same_series_groups:
+                all_columns_have_same_series_groups = True
+                col_series_groups = series_groups
+            else:
+                all_columns_have_same_series_groups = False
+
+
+            all_columns_have_same_series_groups = (
+                False if all([g is None for g in series_groups]) else all_columns_have_same_series_groups
+            )
+
             all_time_series = []
             for i, col in enumerate(df.columns):
+                if not all_columns_have_same_series_groups:
+                    col_series_groups = series_groups[i]
                 all_time_series.append(
                     cls.build_time_series_object(
                     df[col].values,
                     df.index,
                     name[i],
-                    series_groups[i],
+                    col_series_groups,
                     time_series_type,
                     description
                 ))
@@ -1062,7 +1129,6 @@ class DataPoint(BaseModel):
             self.time_series._save_dependencies(session)
             session.add(self.time_series)
 
-
 class TimeSeriesType(BaseModel):
     __tablename__ = 'time_series_type'
     id = db.Column(db.Integer, primary_key=True)
@@ -1085,7 +1151,6 @@ class TimeSeriesType(BaseModel):
 
     def __repr__(self):
         return f'<TimeSeriesType {self.name}>'
-
 
 ================================================================================
 

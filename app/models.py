@@ -13,6 +13,13 @@ seriesgroup_seriesbase = db.Table(
     db.Column('seriesbase_id', db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
 )
 
+# Association table for many-to-many relationship between SeriesBase and Keyword
+seriesbase_keyword = db.Table(
+    'seriesbase_keyword',
+    db.Column('seriesbase_id', db.Integer, db.ForeignKey('series_base.id'), primary_key=True),
+    db.Column('keyword_id', db.Integer, db.ForeignKey('keyword.id'), primary_key=True)
+)
+
 class BaseModel(db.Model):
     __abstract__ = True
 
@@ -39,6 +46,22 @@ class BaseModel(db.Model):
         """
         pass
 
+class Keyword(BaseModel):
+    __tablename__ = 'keyword'
+    id = db.Column(db.Integer, primary_key=True)
+    word = db.Column(db.String(50), unique=True, nullable=False, index=True)
+
+    # Relationship to SeriesBase
+    series = db.relationship(
+        'SeriesBase',
+        secondary=seriesbase_keyword,
+        back_populates='keywords',
+        lazy='dynamic'
+    )
+
+    def __repr__(self):
+        return f'<Keyword {self.word}>'
+
 class SeriesBase(BaseModel):
     __tablename__ = 'series_base'
     id = db.Column(db.Integer, primary_key=True)
@@ -47,8 +70,35 @@ class SeriesBase(BaseModel):
     type = db.Column(db.String(50))  # Discriminator column
 
     date_create = db.Column(db.DateTime(timezone=True), server_default=func.now(), nullable=False)
-    date_update = db.Column(db.DateTime(timezone=True), server_default=func.now(),
-                            onupdate=func.now(), nullable=False)
+    date_update = db.Column(
+        db.DateTime(timezone=True), server_default=func.now(),
+        onupdate=func.now(), nullable=False
+    )
+
+    def __init__(self, name, description=None, keywords=None, **kwargs):
+        """
+        Initializes a SeriesBase instance.
+
+        Parameters:
+        - name (str): The name of the series.
+        - description (str, optional): A description of the series.
+        - keywords (list of str, optional): A list of keyword strings to associate with the series.
+        - **kwargs: Additional keyword arguments for other fields.
+        """
+        super().__init__(**kwargs)
+        self.name = name
+        self.description = description
+        if keywords:
+            for keyword_word in keywords:
+                self.add_keyword(keyword_word)
+
+    # Many-to-Many relationship with Keyword
+    keywords = db.relationship(
+        'Keyword',
+        secondary=seriesbase_keyword,
+        back_populates='series',
+        lazy='dynamic'
+    )
 
     __mapper_args__ = {
         'polymorphic_identity': 'series_base',
@@ -59,10 +109,29 @@ class SeriesBase(BaseModel):
     def __repr__(self):
         return f'<SeriesBase {self.name}>'
 
+    def add_keyword(self, keyword_word):
+        """
+        Adds a keyword to the series. Creates the keyword if it doesn't exist.
+        """
+        keyword = Keyword.query.filter_by(word=keyword_word).first()
+        if not keyword:
+            keyword = Keyword(word=keyword_word)
+            db.session.add(keyword)
+        if not self.keywords.filter_by(word=keyword_word).first():
+            self.keywords.append(keyword)
+
+    def remove_keyword(self, keyword_word):
+        """
+        Removes a keyword from the series.
+        """
+        keyword = Keyword.query.filter_by(word=keyword_word).first()
+        if keyword and self.keywords.filter_by(word=keyword_word).first():
+            self.keywords.remove(keyword)
+
 class SeriesGroup(SeriesBase):
     __tablename__ = 'series_group'
     id = db.Column(db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
-    series_code = db.Column(db.String(5), nullable=False, unique=True)  # Updated to 5 characters
+    series_group_code = db.Column(db.String(5), nullable=False, unique=True)  # Renamed and kept unique
 
     # Self-referential relationship for nested SeriesGroups
     parent_id = db.Column(db.Integer, db.ForeignKey('series_group.id'), nullable=True)
@@ -91,7 +160,9 @@ class SeriesGroup(SeriesBase):
 class TimeSeries(SeriesBase):
     __tablename__ = 'time_series'
     id = db.Column(db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
+    time_series_code = db.Column(db.String(10), nullable=False, unique=True)  # New unique field
     type_id = db.Column(db.Integer, db.ForeignKey('time_series_type.id'), nullable=False)
+    time_frequency = db.Column(db.String(3), nullable=True, default='M')
     delta_type = db.Column(db.String(10), nullable=True, default='pct')
 
     data_points = db.relationship('DataPoint', backref='time_series', lazy=True)

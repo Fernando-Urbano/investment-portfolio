@@ -20,65 +20,15 @@ Install packages:
 pip install -r requirements.txt
 ```
 
-# Start Flask Database
 
-If running the development database:
+# Migrations
+## On macOS/Linux
 ```bash
-export FLASK_APP=development
-```
-
-If running the tets database:
-```bash
-export FLASK_ENV=testing
+export FLASK_APP=run.py
 ```
 
 ```bash
-python -m flask shell
-```
-
-Inside the shell:
-```
-from app import db
-db.create_all()
-```
-
-After completed:
-```
-exit()
-```
-
-Check that the database has been created by running in the terminal.
-
-In development:
-```bash
-psql investment_portfolio
-```
-
-In testing:
-```bash
-psql investment_portfolio_test
-```
-
-```
-\dt
-```
-
-The expected output should be:
-```
-                 List of relations
- Schema |      Name        | Type  | Owner               
---------+------------------+-------+---------------------
- public | asset            | table | fernandorochacorreaurbano
- public | data_point       | table | fernandorochacorreaurbano
- public | time_series      | table | fernandorochacorreaurbano
- public | time_series_type | table | fernandorochacorreaurbano
-(4 rows)
-```
-
-
-# Migrations:
-```bash
-export FLASK_APP=development
+export FLASK_ENV=development
 ```
 
 ```
@@ -98,6 +48,64 @@ flask db migrate -m "Initial migration for Production SQLite"
 ```
 
 ```bash
+python -m flask db init
+```
+
+## On Windows (Command Prompt)
+```bash
+set FLASK_APP=run.py
+```
+
+```bash
+set FLASK_ENV=development
+```
+
+```
+flask db migrate -m "Initial migration for Development SQLite"
+```
+
+```bash
+python -m flask db init
+```
+
+```bash
+set FLASK_ENV=production
+```
+
+```
+flask db migrate -m "Initial migration for Production SQLite"
+```
+
+```bash
+python -m flask db init
+```
+
+## On Windows (PowerShell)
+```powershell
+$env:FLASK_APP="run.py"
+```
+
+```powershell
+$env:FLASK_ENV="development"
+```
+
+```
+flask db migrate -m "Initial migration for Development SQLite"
+```
+
+```powershell
+python -m flask db init
+```
+
+```powershell
+$env:FLASK_ENV="production"
+```
+
+```
+flask db migrate -m "Initial migration for Production SQLite"
+```
+
+```powershell
 python -m flask db init
 ```
 

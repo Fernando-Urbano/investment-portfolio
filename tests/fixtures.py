@@ -16,7 +16,7 @@ def create_seriesgroup_and_type(app):
     Fixture to create a SeriesGroup and a TimeSeriesType.
     Returns the objects themselves.
     """
-    seriesgroup = SeriesGroup(name="SG_Test", description="Test SeriesGroup", series_code="SG999")
+    seriesgroup = SeriesGroup(name="SG_Test", description="Test SeriesGroup", series_group_code="SG999")
     tstype = TimeSeriesType(name="TestType", description="Test TimeSeriesType")
     db.session.add_all([seriesgroup, tstype])
     db.session.commit()
@@ -82,11 +82,11 @@ def populate_test_db(app):
             for _ in range(num_seriesgroups):
                 # Create a random SeriesGroup
                 seriesgroup_name = generate_random_name()
-                series_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
+                series_group_code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=5))
                 seriesgroup = SeriesGroup(
                     name=seriesgroup_name,
                     description=f"{seriesgroup_name} Description",
-                    series_code=series_code
+                    series_group_code=series_group_code
                 )
                 db.session.add(seriesgroup)
                 db.session.commit()
