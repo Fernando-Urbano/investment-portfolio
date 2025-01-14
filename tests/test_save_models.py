@@ -9,7 +9,7 @@ def test_save_seriesgroup(app):
     """
     Test saving a standalone SeriesGroup to the database using the `save` method.
     """
-    seriesgroup = SeriesGroup(name="SG1", description="Test SeriesGroup", series_code="SG001")
+    seriesgroup = SeriesGroup(name="SG1", description="Test SeriesGroup", code="SG001")
     seriesgroup.save()  # or db.session.add(seriesgroup); db.session.commit()
 
     assert seriesgroup.id is not None, "SeriesGroup ID should be generated after saving."
@@ -18,7 +18,7 @@ def test_save_seriesgroup(app):
     retrieved = SeriesGroup.query.first()
     assert retrieved.name == "SG1", "Retrieved SeriesGroup name should match 'SG1'."
     assert retrieved.description == "Test SeriesGroup", "SeriesGroup description should match."
-    assert retrieved.series_code == "SG001", "SeriesGroup series_code should match 'SG001'."
+    assert retrieved.series_group_code == "SG001", "SeriesGroup series_group_code should match 'SG001'."
 
 def test_save_time_series_type(app):
     """
@@ -39,12 +39,13 @@ def test_save_time_series_with_dependencies(app):
     Test saving a TimeSeries that depends on a SeriesGroup and a TimeSeriesType.
     Verifies the parent objects can be saved together if they're new.
     """
-    seriesgroup = SeriesGroup(name="SG2", description="Second SeriesGroup", series_code="SG002")
+    seriesgroup = SeriesGroup(name="SG2", description="Second SeriesGroup", series_group_code="SG002")
     tstype = TimeSeriesType(name="Volume", description="Volume Time Series")
 
     ts = TimeSeries(
         name="TS-Test",
-        time_series_type=tstype  # Correct: Assign the object, not the ID
+        time_series_type=tstype,  # Correct: Assign the object, not the ID
+        code="TST"
     )
     ts.series_groups.append(seriesgroup)
 
@@ -73,10 +74,10 @@ def test_save_data_points_with_timeseries(app):
     Test saving a TimeSeries along with multiple DataPoints.
     Ensures child DataPoints are also saved.
     """
-    seriesgroup = SeriesGroup(name="SG3", description="Third SeriesGroup", series_code="SG003")
+    seriesgroup = SeriesGroup(name="SG3", description="Third SeriesGroup", series_group_code="SG003")
     tstype = TimeSeriesType(name="Price", description="Price Time Series")
 
-    ts = TimeSeries(name="TS-DataPoints", time_series_type=tstype)  # Correct assignment
+    ts = TimeSeries(name="TS-DataPoints", time_series_type=tstype, code="109")  # Correct assignment
     ts.series_groups.append(seriesgroup)
 
     dp1 = DataPoint(date=datetime.date(2025, 1, 10), value=4000.0)
@@ -102,9 +103,9 @@ def test_save_datapoint_alone_with_parents(app):
     Test saving a single DataPoint that has a reference to a new TimeSeries,
     which references a new SeriesGroup and TimeSeriesType. All should be saved.
     """
-    seriesgroup = SeriesGroup(name="SG4", description="Fourth SeriesGroup", series_code="SG004")
+    seriesgroup = SeriesGroup(name="SG4", description="Fourth SeriesGroup", series_group_code="SG004")
     tstype = TimeSeriesType(name="Bids", description="Bid Time Series")
-    ts = TimeSeries(name="TS-Bids", time_series_type=tstype)  # Correct assignment
+    ts = TimeSeries(name="TS-Bids", time_series_type=tstype, code="1291")  # Correct assignment
     ts.series_groups.append(seriesgroup)
 
     dp = DataPoint(date=datetime.date(2025, 1, 12), value=5001.5, time_series=ts)
@@ -131,9 +132,9 @@ def test_save_multiple_objects_in_one_session(app):
     """
     Test saving multiple objects in one transaction without committing until the end.
     """
-    seriesgroup = SeriesGroup(name="SG5", description="Fifth SeriesGroup", series_code="SG005")
+    seriesgroup = SeriesGroup(name="SG5", description="Fifth SeriesGroup", series_group_code="SG005")
     tstype = TimeSeriesType(name="Spread", description="Spread Time Series")
-    ts = TimeSeries(name="TS-Spread", time_series_type=tstype)  # Correct assignment
+    ts = TimeSeries(name="TS-Spread", time_series_type=tstype, code="183")  # Correct assignment
     ts.series_groups.append(seriesgroup)
     dp = DataPoint(date=datetime.date(2025, 1, 13), value=3999.9, time_series=ts)
 

@@ -64,10 +64,218 @@ from .fixtures import (
 
 ================================================================================
 
+FILE NAME: tests/test_keywords.py
+
+# tests/test_keywords.py
+
+import pytest
+from sqlalchemy.exc import IntegrityError, InvalidRequestError
+from sqlalchemy.orm import joinedload
+from sqlalchemy import select
+from app.models import SeriesGroup, Keyword, SeriesBase
+from app import db
+
+@pytest.fixture
+def seriesgroup(app):
+    """
+    Fixture to create a SeriesGroup without keywords.
+    """
+    sg = SeriesGroup(
+        name="SG_Test",
+        description="Test SeriesGroup",
+        series_group_code="SG999"
+    )
+    sg.save()
+    return sg
+
+def test_add_keywords_during_creation(app):
+    """
+    Test creating a SeriesGroup and adding keywords after saving.
+    Verify that keywords are saved and associated correctly.
+    """
+    keywords = ["Finance", "Investment", "Portfolio"]
+    sg = SeriesGroup(
+        name="SG_WithKeywords",
+        description="SeriesGroup with initial keywords",
+        series_group_code="SG100"
+        # Do not pass keywords here to avoid DetachedInstanceError
+    )
+    sg.save()
+
+    # Now, add keywords after the object is bound to the session
+    for kw in keywords:
+        sg.add_keyword(kw)
+    sg.save()
+
+    # Retrieve the SeriesGroup from the database with keywords eagerly loaded
+    stmt = select(SeriesGroup).options(joinedload(SeriesGroup.keywords)).where(SeriesGroup.id == sg.id)
+    retrieved_sg = db.session.execute(stmt).scalars().unique().one()
+
+    assert retrieved_sg is not None, "SeriesGroup should be saved and retrievable."
+
+    # Verify keywords are associated
+    associated_keywords = [kw.word for kw in retrieved_sg.keywords]
+    assert set(associated_keywords) == set(keywords), "Keywords should match the ones provided during creation."
+
+def test_add_keywords_later(app, seriesgroup):
+    """
+    Test adding keywords to a SeriesGroup after it has been created.
+    Verify that keywords are saved and associated correctly.
+    """
+    # Initially, the SeriesGroup has no keywords
+    stmt = select(SeriesGroup).options(joinedload(SeriesGroup.keywords)).where(SeriesGroup.id == seriesgroup.id)
+    retrieved_sg = db.session.execute(stmt).scalars().unique().one()
+    assert len(retrieved_sg.keywords) == 0, "SeriesGroup should initially have no keywords."
+
+    # Add keywords
+    new_keywords = ["Stocks", "Bonds"]
+    for kw in new_keywords:
+        retrieved_sg.add_keyword(kw)
+
+    # Save the changes
+    retrieved_sg.save()
+
+    # Retrieve again with eager loading
+    retrieved_sg = db.session.execute(stmt).scalars().unique().one()
+
+    # Verify keywords are associated
+    associated_keywords = [kw.word for kw in retrieved_sg.keywords]
+    assert set(associated_keywords) == set(new_keywords), "Keywords should match the ones added later."
+
+def test_add_duplicate_keywords(app, seriesgroup):
+    """
+    Test that adding duplicate keywords does not create duplicate entries in the database.
+    """
+    keyword = "Equity"
+    # Add the keyword for the first time
+    seriesgroup.add_keyword(keyword)
+    seriesgroup.save()
+
+    # Attempt to add the same keyword again
+    seriesgroup.add_keyword(keyword)
+    seriesgroup.save()
+
+    # Retrieve with eager loading
+    stmt = select(SeriesGroup).options(joinedload(SeriesGroup.keywords)).where(SeriesGroup.id == seriesgroup.id)
+    retrieved_sg = db.session.execute(stmt).scalars().unique().one()
+
+    # Verify only one instance of the keyword exists
+    assert len(retrieved_sg.keywords) == 1, "Duplicate keywords should not be added."
+    assert retrieved_sg.keywords[0].word == keyword, "Keyword should match the one added."
+
+def test_add_invalid_keyword_length(app, seriesgroup):
+    """
+    Test that adding a keyword exceeding the maximum length raises a ValueError.
+    """
+    invalid_keyword = "K" * 51  # Exceeds the 50 character limit
+
+    with pytest.raises(ValueError) as exc_info:
+        # Attempt to add an overly long keyword
+        seriesgroup.add_keyword(invalid_keyword)
+        seriesgroup.save()
+    # No need to rollback since the exception is handled
+
+    assert "Keyword must be 50 characters or less." in str(exc_info.value), \
+        "Adding a keyword with invalid length should raise a ValueError."
+
+def test_remove_keyword(app, seriesgroup):
+    """
+    Test removing a keyword from a SeriesGroup.
+    """
+    keywords = ["Growth", "Value", "Income"]
+    for kw in keywords:
+        seriesgroup.add_keyword(kw)
+    seriesgroup.save()
+
+    # Retrieve with eager loading
+    stmt = select(SeriesGroup).options(joinedload(SeriesGroup.keywords)).where(SeriesGroup.id == seriesgroup.id)
+    retrieved_sg = db.session.execute(stmt).scalars().unique().one()
+
+    assert len(retrieved_sg.keywords) == 3, "SeriesGroup should have three keywords initially."
+
+    # Remove one keyword
+    retrieved_sg.remove_keyword("Value")
+    retrieved_sg.save()
+
+    # Retrieve again with eager loading
+    retrieved_sg = db.session.execute(stmt).scalars().unique().one()
+
+    # Verify the keyword is removed
+    associated_keywords = [kw.word for kw in retrieved_sg.keywords]
+    assert "Value" not in associated_keywords, "Keyword 'Value' should be removed."
+    assert len(retrieved_sg.keywords) == 2, "SeriesGroup should have two keywords after removal."
+
+def test_add_keyword_with_invalid_type(app, seriesgroup):
+    """
+    Test that adding a keyword with an invalid type (non-string) raises a TypeError.
+    """
+    invalid_keyword = 12345  # Non-string keyword
+
+    with pytest.raises(TypeError) as exc_info:
+        # Attempt to add a non-string keyword
+        seriesgroup.add_keyword(invalid_keyword)
+        seriesgroup.save()
+    # No need to rollback since the exception is handled
+
+    assert "Keyword must be a string." in str(exc_info.value), \
+        "Adding a keyword with invalid type should raise a TypeError."
+
+def test_save_and_retrieve_keywords(app):
+    """
+    Test saving a SeriesGroup with keywords and retrieving it to verify persistence.
+    """
+    keywords = ["Alpha", "Beta", "Gamma"]
+    sg = SeriesGroup(
+        name="SG_Persistence",
+        description="SeriesGroup for persistence test",
+        series_group_code="SG200"
+        # Do not pass keywords here to avoid DetachedInstanceError
+    )
+    sg.save()
+
+    # Now, add keywords after the object is bound to the session
+    for kw in keywords:
+        sg.add_keyword(kw)
+    sg.save()
+
+    # Retrieve the SeriesGroup from the database with keywords eagerly loaded
+    stmt = select(SeriesGroup).options(joinedload(SeriesGroup.keywords)).where(SeriesGroup.id == sg.id)
+    retrieved_sg = db.session.execute(stmt).scalars().unique().one()
+
+    assert retrieved_sg is not None, "SeriesGroup should be retrievable after saving."
+
+    # Verify keywords are persisted
+    associated_keywords = [kw.word for kw in retrieved_sg.keywords]
+    assert set(associated_keywords) == set(keywords), "Persisted keywords should match the ones saved."
+
+def test_save_keywords_added_later(app, seriesgroup):
+    """
+    Test saving keywords added after the initial creation and verifying persistence.
+    """
+    # Add keywords after creation
+    keywords = ["Delta", "Epsilon"]
+    for kw in keywords:
+        seriesgroup.add_keyword(kw)
+    seriesgroup.save()
+
+    # Retrieve the SeriesGroup with keywords eagerly loaded
+    stmt = select(SeriesGroup).options(joinedload(SeriesGroup.keywords)).where(SeriesGroup.id == seriesgroup.id)
+    retrieved_sg = db.session.execute(stmt).scalars().unique().one()
+
+    assert retrieved_sg is not None, "SeriesGroup should be retrievable after adding keywords."
+
+    # Verify keywords are persisted
+    associated_keywords = [kw.word for kw in retrieved_sg.keywords]
+    assert set(associated_keywords) == set(keywords), "Persisted keywords should match the ones added later."
+
+================================================================================
+
 FILE NAME: tests/test_timeseries.py
 
 # tests/test_timeseries.py
 
+import random
+import string
 import pytest
 import datetime
 import pandas as pd
@@ -88,6 +296,7 @@ def test_from_dataframe_single_column(
     with app.app_context():
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
+            code='AAPL',  # Add a code for the TimeSeries
             series_groups=[seriesgroup],  # Pass as a list of objects
             time_series_type=tstype  # Assign the object directly
         )
@@ -118,6 +327,7 @@ def test_from_dataframe_single_column_with_seriesgroup_and_tstype(
     with app.app_context():
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
+            code='AAPL',
             series_groups=[seriesgroup],  # Pass as a list of objects
             time_series_type=tstype  # Assign the object directly
         )
@@ -154,6 +364,7 @@ def test_from_dataframe_single_column_with_date_as_column(
             df=sample_df,
             series_groups=[seriesgroup],  # Pass as a list of objects
             time_series_type=tstype,  # Assign the object directly
+            code='AAPL',
             date_column="Datetime"
         )
 
@@ -185,11 +396,13 @@ def test_from_dataframe_multi_column(
         # Since there are multiple columns, provide a list of SeriesGroup objects
         # For simplicity, using the same SeriesGroup for all columns
         series_groups = [seriesgroup for _ in range(num_columns)]
+        codes = [''.join(random.choices(string.ascii_uppercase, k=3)) for _ in range(num_columns)]
 
         ts_objs = TimeSeries.from_dataframe(
             df=sample_df_multiple_columns,
             series_groups=series_groups,  # Pass as a list of objects
-            time_series_type=tstype  # Assign the object directly
+            time_series_type=tstype,  # Assign the object directly
+            code=codes  # Add a code for all TimeSeries
         )
 
         # Expect a list of TimeSeries objects
@@ -213,11 +426,13 @@ def test_to_dataframe_multi_column(
         # Provide a list of SeriesGroup objects matching the number of columns
         num_columns = len(sample_df_multiple_columns.columns)
         series_groups = [seriesgroup for _ in range(num_columns)]
+        codes = [''.join(random.choices(string.ascii_uppercase, k=3)) for _ in range(num_columns)]
 
         ts_objs = TimeSeries.from_dataframe(
             df=sample_df_multiple_columns,
             series_groups=series_groups,  # Pass as a list of objects
-            time_series_type=tstype  # Assign the object directly
+            time_series_type=tstype,  # Assign the object directly
+            code=codes  # Add a code for all TimeSeries
         )
         for ts_obj in ts_objs:
             ts_dataframe = ts_obj.to_dataframe()
@@ -239,7 +454,8 @@ def test_to_dataframe_single_column(
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
             series_groups=[seriesgroup],  # Pass as a list of objects
-            time_series_type=tstype  # Assign the object directly
+            time_series_type=tstype,  # Assign the object directly
+            code='AAPL'
         )
 
         ts_dataframe = ts_obj.to_dataframe()
@@ -326,6 +542,308 @@ FILE NAME: tests/__init__.py
 
 ================================================================================
 
+FILE NAME: tests/test_relationships.py
+
+# tests/test_relationships.py
+
+import pytest
+import datetime
+from app import db
+from app.models import SeriesGroup, TimeSeries, SeriesBase, TimeSeriesType, Keyword, DataPoint
+
+@pytest.fixture
+def create_parent_child_seriesgroups(app):
+    """
+    Fixture to create a parent SeriesGroup with multiple child SeriesGroups.
+    """
+    parent = SeriesGroup(name="ParentSG", description="Parent SeriesGroup", series_group_code="PSG001")
+    child1 = SeriesGroup(name="ChildSG1", description="First Child SeriesGroup", series_group_code="CSG001", parent=parent)
+    child2 = SeriesGroup(name="ChildSG2", description="Second Child SeriesGroup", series_group_code="CSG002", parent=parent)
+    db.session.add_all([parent, child1, child2])
+    db.session.commit()
+    return parent, child1, child2
+
+def test_seriesgroup_parent_child_relationship(app, create_parent_child_seriesgroups):
+    """
+    Test the self-referential parent-child relationship in SeriesGroup.
+    """
+    parent, child1, child2 = create_parent_child_seriesgroups
+
+    # Verify parent has two children
+    assert len(parent.children.all()) == 2, "Parent SeriesGroup should have two children."
+    assert child1.parent == parent, "Child1's parent should be ParentSG."
+    assert child2.parent == parent, "Child2's parent should be ParentSG."
+
+    # Verify children are correctly linked
+    assert child1 in parent.children.all(), "Child1 should be in ParentSG's children."
+    assert child2 in parent.children.all(), "Child2 should be in ParentSG's children."
+
+def test_polymorphic_querying(app):
+    """
+    Test that querying SeriesBase returns instances of the correct subclasses.
+    """
+    tstype = TimeSeriesType(name="Polymorphic", description="Polymorphic TimeSeriesType")
+
+    # Create a SeriesGroup
+    sg = SeriesGroup(name="SG_Poly", description="Polymorphic SeriesGroup", series_group_code="SGP001")
+    db.session.add(sg)
+
+    # Create a TimeSeries
+    ts = TimeSeries(name="TS_Poly", time_series_type=tstype, code="TSP001")
+    db.session.add(ts)
+
+    db.session.commit()
+
+    # Query SeriesBase
+    all_seriesbase = SeriesBase.query.all()
+    assert len(all_seriesbase) == 2, "There should be three SeriesBase instances."
+    
+    # Optionally, verify the types of each instance
+    assert any(isinstance(sb, SeriesGroup) for sb in all_seriesbase), "At least one SeriesGroup should be present."
+    assert any(isinstance(sb, TimeSeries) for sb in all_seriesbase), "At least one TimeSeries should be present."
+
+def test_seriesgroup_seriesbase_association(app, create_seriesgroup_and_type):
+    """
+    Test the many-to-many relationship between SeriesGroup and SeriesBase.
+    """
+    seriesgroup, tstype = create_seriesgroup_and_type
+
+    # Create additional SeriesBase instances
+    ts1 = TimeSeries(name="TS_Assoc1", time_series_type=tstype, code="TSA001")
+    ts2 = TimeSeries(name="TS_Assoc2", time_series_type=tstype, code="TSA002")
+    db.session.add_all([ts1, ts2])
+    db.session.commit()
+
+    # Associate SeriesBase with SeriesGroup
+    seriesgroup.series.append(ts1)
+    seriesgroup.series.append(ts2)
+    db.session.commit()
+
+    # Verify associations
+    assert ts1 in seriesgroup.series.all(), "TS_Assoc1 should be associated with SeriesGroup."
+    assert ts2 in seriesgroup.series.all(), "TS_Assoc2 should be associated with SeriesGroup."
+    assert seriesgroup in ts1.series_groups.all(), "SeriesGroup should be associated with TS_Assoc1."
+    assert seriesgroup in ts2.series_groups.all(), "SeriesGroup should be associated with TS_Assoc2."
+
+def test_keyword_uniqueness(app, create_seriesgroup_and_type):
+    """
+    Test that adding duplicate keywords raises an IntegrityError.
+    """
+    seriesgroup, tstype = create_seriesgroup_and_type
+
+    # Add a keyword
+    keyword = Keyword(word="Finance")
+    db.session.add(keyword)
+    db.session.commit()
+
+    # Attempt to add the same keyword again
+    duplicate_keyword = Keyword(word="Finance")
+    db.session.add(duplicate_keyword)
+
+    with pytest.raises(Exception) as exc_info:
+        db.session.commit()
+
+    db.session.rollback()
+    assert 'UNIQUE constraint failed' in str(exc_info.value), "Adding duplicate keyword should fail due to unique constraint."
+
+def test_seriesgroup_unique_code(app, create_seriesgroup_and_type):
+    """
+    Test that SeriesGroup's series_group_code is unique.
+    """
+    seriesgroup, tstype = create_seriesgroup_and_type
+
+    # Create a SeriesGroup with a unique code
+    sg_unique = SeriesGroup(name="UniqueSG", description="Unique Code SeriesGroup", series_group_code="USG001")
+    db.session.add(sg_unique)
+    db.session.commit()
+
+    # Attempt to create another SeriesGroup with the same code
+    sg_duplicate = SeriesGroup(name="DuplicateSG", description="Duplicate Code SeriesGroup", series_group_code="USG001")
+    db.session.add(sg_duplicate)
+
+    with pytest.raises(Exception) as exc_info:
+        db.session.commit()
+
+    db.session.rollback()
+    assert 'UNIQUE constraint failed' in str(exc_info.value), "Adding SeriesGroup with duplicate code should fail due to unique constraint."
+
+def test_time_series_unique_code(app, create_seriesgroup_and_type):
+    """
+    Test that TimeSeries's time_series_code is unique.
+    """
+    seriesgroup, tstype = create_seriesgroup_and_type
+
+    # Create a TimeSeries with a unique code
+    ts_unique = TimeSeries(name="UniqueTS", time_series_type=tstype, code="UTS001")
+    db.session.add(ts_unique)
+    db.session.commit()
+
+    # Attempt to create another TimeSeries with the same code
+    ts_duplicate = TimeSeries(name="DuplicateTS", time_series_type=tstype, code="UTS001")
+    db.session.add(ts_duplicate)
+
+    with pytest.raises(Exception) as exc_info:
+        db.session.commit()
+
+    db.session.rollback()
+    assert 'UNIQUE constraint failed' in str(exc_info.value), "Adding TimeSeries with duplicate code should fail due to unique constraint."
+
+def test_seriesbase_deletion_cascade(app, create_seriesgroup_and_type):
+    """
+    Test that deleting a SeriesBase (TimeSeries) also deletes associated DataPoints if cascade is set.
+    """
+    seriesgroup, tstype = create_seriesgroup_and_type
+
+    # Create a TimeSeries with DataPoints
+    ts = TimeSeries(name="TS_DeleteCascade", time_series_type=tstype, code="TSC001")
+    dp1 = DataPoint(date=datetime.date(2025, 1, 1), value=100.0, time_series=ts)
+    dp2 = DataPoint(date=datetime.date(2025, 1, 2), value=110.0, time_series=ts)
+    db.session.add_all([ts, dp1, dp2])
+    db.session.commit()
+
+    # Verify DataPoints exist
+    assert DataPoint.query.filter_by(time_series_id=ts.id).count() == 2, "There should be two DataPoints associated with the TimeSeries."
+
+    # Delete the TimeSeries
+    db.session.delete(ts)
+    db.session.commit()
+
+    # Verify TimeSeries is deleted
+    assert TimeSeries.query.filter_by(id=ts.id).count() == 0, "TimeSeries should be deleted."
+
+    # Verify DataPoints are also deleted if cascade is set
+    # Note: Ensure that cascade delete is configured in the relationship if expected
+    assert DataPoint.query.filter_by(time_series_id=ts.id).count() == 0, "Associated DataPoints should be deleted with the TimeSeries."
+
+def test_validate_code_len_decorator(app, create_seriesgroup_and_type):
+    """
+    Test that the validate_code_len decorator enforces code length constraints.
+    """
+    seriesgroup, tstype = create_seriesgroup_and_type
+
+    # Attempt to create a SeriesGroup with a code exceeding CODE_MAX_LEN
+    long_code = 'A' * 13  # Assuming CODE_MAX_LEN is 12
+
+    with pytest.raises(ValueError) as exc_info:
+        sg = SeriesGroup(name="LongCodeSG", description="SeriesGroup with long code", series_group_code=long_code)
+        sg.save()
+
+    db.session.rollback()
+    assert "Code must be 12 characters or less." in str(exc_info.value), "Code length validation should fail for codes longer than 12 characters."
+
+def test_seriesgroup_nested_relationship(app, create_seriesgroup_and_type):
+    """
+    Test creating nested SeriesGroups (grandchildren).
+    """
+    seriesgroup, tstype = create_seriesgroup_and_type
+
+    # Create child SeriesGroups
+    child1 = SeriesGroup(name="ChildSG1", description="First Child SeriesGroup", series_group_code="CSG001", parent=seriesgroup)
+    child2 = SeriesGroup(name="ChildSG2", description="Second Child SeriesGroup", series_group_code="CSG002", parent=seriesgroup)
+    db.session.add_all([child1, child2])
+    db.session.commit()
+
+    # Create grandchildren
+    grandchild1 = SeriesGroup(name="GrandChildSG1", description="First Grandchild SeriesGroup", series_group_code="GCSG001", parent=child1)
+    grandchild2 = SeriesGroup(name="GrandChildSG2", description="Second Grandchild SeriesGroup", series_group_code="GCSG002", parent=child1)
+    db.session.add_all([grandchild1, grandchild2])
+    db.session.commit()
+
+    # Verify relationships
+    assert grandchild1.parent == child1, "Grandchild1's parent should be ChildSG1."
+    assert grandchild2.parent == child1, "Grandchild2's parent should be ChildSG1."
+    assert child1 in seriesgroup.children.all(), "ChildSG1 should be a child of ParentSG."
+    assert grandchild1 in child1.children.all(), "GrandChildSG1 should be a child of ChildSG1."
+    assert grandchild2 in child1.children.all(), "GrandChildSG2 should be a child of ChildSG1."
+
+def test_seriesbase_keywords_relationship(app, create_seriesgroup_and_type):
+    """
+    Test that SeriesBase (SeriesGroup and TimeSeries) can have multiple keywords associated.
+    """
+    seriesgroup, tstype = create_seriesgroup_and_type
+
+    # Add keywords to SeriesGroup
+    seriesgroup.add_keyword("Finance")
+    seriesgroup.add_keyword("Investment")
+    db.session.commit()
+
+    # Verify keywords
+    assert len(seriesgroup.keywords) == 2, "SeriesGroup should have two keywords."
+    keywords = [kw.word for kw in seriesgroup.keywords]
+    assert "Finance" in keywords, "SeriesGroup should have the 'Finance' keyword."
+    assert "Investment" in keywords, "SeriesGroup should have the 'Investment' keyword."
+
+    # Create a TimeSeries and add keywords
+    ts = TimeSeries(name="TS_Keywords", time_series_type=tstype, code="TSK001")
+    ts.add_keyword("Growth")
+    ts.add_keyword("Value")
+    db.session.add(ts)
+    db.session.commit()
+
+    # Verify keywords
+    assert len(ts.keywords) == 2, "TimeSeries should have two keywords."
+    ts_keywords = [kw.word for kw in ts.keywords]
+    assert "Growth" in ts_keywords, "TimeSeries should have the 'Growth' keyword."
+    assert "Value" in ts_keywords, "TimeSeries should have the 'Value' keyword."
+
+def test_datapoint_date_release_logic(app, create_seriesgroup_and_type):
+    """
+    Test the conditional assignment of date_release in DataPoint.
+    """
+    seriesgroup, tstype = create_seriesgroup_and_type
+
+    # Create a TimeSeries
+    ts = TimeSeries(name="TS_DateRelease", time_series_type=tstype, code="TSD001")
+    db.session.add(ts)
+    db.session.commit()
+
+    # Create DataPoints with and without date_release
+    dp1 = DataPoint(date=datetime.date(2025, 1, 1), value=100.0, date_release=datetime.date(2025, 1, 2), time_series=ts)
+    dp2 = DataPoint(date=datetime.date(2025, 1, 3), value=110.0, time_series=ts)  # No date_release
+    db.session.add_all([dp1, dp2])
+    db.session.commit()
+
+    # Verify date_release
+    assert dp1.date_release == datetime.date(2025, 1, 2), "DataPoint1's date_release should be set correctly."
+    assert dp2.date_release is None, "DataPoint2's date_release should be None."
+
+def test_seriesbase_unique_constraints(app, create_seriesgroup_and_type):
+    """
+    Test unique constraints on SeriesGroup and TimeSeries.
+    """
+    seriesgroup, tstype = create_seriesgroup_and_type
+
+    # Create a SeriesGroup with a unique code
+    sg1 = SeriesGroup(name="SG_Unique1", description="Unique SeriesGroup 1", series_group_code="SGU001")
+    db.session.add(sg1)
+    db.session.commit()
+
+    # Attempt to create another SeriesGroup with the same code
+    sg2 = SeriesGroup(name="SG_Unique2", description="Unique SeriesGroup 2", series_group_code="SGU001")
+    db.session.add(sg2)
+
+    with pytest.raises(Exception) as exc_info:
+        db.session.commit()
+
+    db.session.rollback()
+    assert 'UNIQUE constraint failed' in str(exc_info.value), "Duplicate SeriesGroup codes should violate unique constraint."
+
+    # Similarly, test TimeSeries unique code
+    ts1 = TimeSeries(name="TS_Unique1", time_series_type=tstype, code="TSU001")
+    db.session.add(ts1)
+    db.session.commit()
+
+    ts2 = TimeSeries(name="TS_Unique2", time_series_type=tstype, code="TSU001")
+    db.session.add(ts2)
+
+    with pytest.raises(Exception) as exc_info_ts:
+        db.session.commit()
+
+    db.session.rollback()
+    assert 'UNIQUE constraint failed' in str(exc_info_ts.value), "Duplicate TimeSeries codes should violate unique constraint."
+
+================================================================================
+
 FILE NAME: tests/test_save_models.py
 
 # tests/test_save_models.py
@@ -339,7 +857,7 @@ def test_save_seriesgroup(app):
     """
     Test saving a standalone SeriesGroup to the database using the `save` method.
     """
-    seriesgroup = SeriesGroup(name="SG1", description="Test SeriesGroup", series_code="SG001")
+    seriesgroup = SeriesGroup(name="SG1", description="Test SeriesGroup", code="SG001")
     seriesgroup.save()  # or db.session.add(seriesgroup); db.session.commit()
 
     assert seriesgroup.id is not None, "SeriesGroup ID should be generated after saving."
@@ -348,7 +866,7 @@ def test_save_seriesgroup(app):
     retrieved = SeriesGroup.query.first()
     assert retrieved.name == "SG1", "Retrieved SeriesGroup name should match 'SG1'."
     assert retrieved.description == "Test SeriesGroup", "SeriesGroup description should match."
-    assert retrieved.series_code == "SG001", "SeriesGroup series_code should match 'SG001'."
+    assert retrieved.series_group_code == "SG001", "SeriesGroup series_group_code should match 'SG001'."
 
 def test_save_time_series_type(app):
     """
@@ -369,12 +887,13 @@ def test_save_time_series_with_dependencies(app):
     Test saving a TimeSeries that depends on a SeriesGroup and a TimeSeriesType.
     Verifies the parent objects can be saved together if they're new.
     """
-    seriesgroup = SeriesGroup(name="SG2", description="Second SeriesGroup", series_code="SG002")
+    seriesgroup = SeriesGroup(name="SG2", description="Second SeriesGroup", series_group_code="SG002")
     tstype = TimeSeriesType(name="Volume", description="Volume Time Series")
 
     ts = TimeSeries(
         name="TS-Test",
-        time_series_type=tstype  # Correct: Assign the object, not the ID
+        time_series_type=tstype,  # Correct: Assign the object, not the ID
+        code="TST"
     )
     ts.series_groups.append(seriesgroup)
 
@@ -403,10 +922,10 @@ def test_save_data_points_with_timeseries(app):
     Test saving a TimeSeries along with multiple DataPoints.
     Ensures child DataPoints are also saved.
     """
-    seriesgroup = SeriesGroup(name="SG3", description="Third SeriesGroup", series_code="SG003")
+    seriesgroup = SeriesGroup(name="SG3", description="Third SeriesGroup", series_group_code="SG003")
     tstype = TimeSeriesType(name="Price", description="Price Time Series")
 
-    ts = TimeSeries(name="TS-DataPoints", time_series_type=tstype)  # Correct assignment
+    ts = TimeSeries(name="TS-DataPoints", time_series_type=tstype, code="109")  # Correct assignment
     ts.series_groups.append(seriesgroup)
 
     dp1 = DataPoint(date=datetime.date(2025, 1, 10), value=4000.0)
@@ -432,9 +951,9 @@ def test_save_datapoint_alone_with_parents(app):
     Test saving a single DataPoint that has a reference to a new TimeSeries,
     which references a new SeriesGroup and TimeSeriesType. All should be saved.
     """
-    seriesgroup = SeriesGroup(name="SG4", description="Fourth SeriesGroup", series_code="SG004")
+    seriesgroup = SeriesGroup(name="SG4", description="Fourth SeriesGroup", series_group_code="SG004")
     tstype = TimeSeriesType(name="Bids", description="Bid Time Series")
-    ts = TimeSeries(name="TS-Bids", time_series_type=tstype)  # Correct assignment
+    ts = TimeSeries(name="TS-Bids", time_series_type=tstype, code="1291")  # Correct assignment
     ts.series_groups.append(seriesgroup)
 
     dp = DataPoint(date=datetime.date(2025, 1, 12), value=5001.5, time_series=ts)
@@ -461,9 +980,9 @@ def test_save_multiple_objects_in_one_session(app):
     """
     Test saving multiple objects in one transaction without committing until the end.
     """
-    seriesgroup = SeriesGroup(name="SG5", description="Fifth SeriesGroup", series_code="SG005")
+    seriesgroup = SeriesGroup(name="SG5", description="Fifth SeriesGroup", series_group_code="SG005")
     tstype = TimeSeriesType(name="Spread", description="Spread Time Series")
-    ts = TimeSeries(name="TS-Spread", time_series_type=tstype)  # Correct assignment
+    ts = TimeSeries(name="TS-Spread", time_series_type=tstype, code="183")  # Correct assignment
     ts.series_groups.append(seriesgroup)
     dp = DataPoint(date=datetime.date(2025, 1, 13), value=3999.9, time_series=ts)
 
@@ -588,7 +1107,8 @@ def populate_test_db(app):
                 time_series = TimeSeries(
                     name=f"{seriesgroup_name} {time_series_name}",
                     type_id=time_series_type.id,
-                    delta_type='pct'  # Assuming default or desired value
+                    delta_type='pct',  # Assuming default or desired value
+                    code=series_group_code + time_series_name[0].upper()
                 )
                 db.session.add(time_series)
                 db.session.commit()

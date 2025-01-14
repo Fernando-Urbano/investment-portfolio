@@ -96,7 +96,8 @@ def populate_test_db(app):
                 time_series = TimeSeries(
                     name=f"{seriesgroup_name} {time_series_name}",
                     type_id=time_series_type.id,
-                    delta_type='pct'  # Assuming default or desired value
+                    delta_type='pct',  # Assuming default or desired value
+                    code=series_group_code + time_series_name[0].upper()
                 )
                 db.session.add(time_series)
                 db.session.commit()

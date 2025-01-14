@@ -8,30 +8,52 @@
 │   ├── __pycache__
 │   │   ├── __init__.cpython-312.pyc
 │   │   ├── models.cpython-312.pyc
-│   │   └── routes.cpython-312.pyc
+│   │   ├── routes.cpython-312.pyc
+│   │   └── utils.cpython-312.pyc
 │   ├── models.py
 │   ├── routes.py
 │   ├── static
-│   └── templates
+│   ├── templates
+│   └── utils.py
 ├── config.py
+├── dev_database.db
 ├── join_files.py
+├── migrations
+│   ├── README
+│   ├── __pycache__
+│   │   └── env.cpython-312.pyc
+│   ├── alembic.ini
+│   ├── env.py
+│   ├── script.py.mako
+│   └── versions
+│       ├── 248ae2c313bd_initial_migration_for_development_sqlite.py
+│       ├── 370e414ac95f_initial_migration_for_development_sqlite.py
+│       └── __pycache__
+│           ├── 248ae2c313bd_initial_migration_for_development_sqlite.cpython-312.pyc
+│           └── 370e414ac95f_initial_migration_for_development_sqlite.cpython-312.pyc
 ├── requirements.txt
 ├── run.py
 ├── scripts
-└── tests
-    ├── __init__.py
-    ├── __pycache__
-    │   ├── __init__.cpython-312.pyc
-    │   ├── conftest.cpython-312-pytest-8.3.4.pyc
-    │   ├── fixtures.cpython-312.pyc
-    │   ├── test_initial_database_population.cpython-312-pytest-8.3.4.pyc
-    │   ├── test_save_models.cpython-312-pytest-8.3.4.pyc
-    │   ├── test_save_modules.cpython-312-pytest-8.3.4.pyc
-    │   └── test_timeseries.cpython-312-pytest-8.3.4.pyc
-    ├── conftest.py
-    ├── fixtures.py
-    ├── test_initial_database_population.py
-    ├── test_save_models.py
-    └── test_timeseries.py
+├── tests
+│   ├── __init__.py
+│   ├── __pycache__
+│   │   ├── __init__.cpython-312.pyc
+│   │   ├── conftest.cpython-312-pytest-8.3.4.pyc
+│   │   ├── fixtures.cpython-312.pyc
+│   │   ├── test_initial_database_population.cpython-312-pytest-8.3.4.pyc
+│   │   ├── test_keywords.cpython-312-pytest-8.3.4.pyc
+│   │   ├── test_relationships.cpython-312-pytest-8.3.4.pyc
+│   │   ├── test_save_models.cpython-312-pytest-8.3.4.pyc
+│   │   ├── test_save_modules.cpython-312-pytest-8.3.4.pyc
+│   │   └── test_timeseries.cpython-312-pytest-8.3.4.pyc
+│   ├── conftest.py
+│   ├── fixtures.py
+│   ├── test_initial_database_population.py
+│   ├── test_keywords.py
+│   ├── test_relationships.py
+│   ├── test_save_models.py
+│   └── test_timeseries.py
+└── tutorial
+    └── save_time_series.ipynb
 
-9 directories, 26 files
+14 directories, 43 files

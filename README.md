@@ -31,24 +31,32 @@ export FLASK_APP=run.py
 export FLASK_ENV=development
 ```
 
-```
-flask db migrate -m "Initial migration for Development SQLite"
+```bash
+python -m flask db init
 ```
 
 ```bash
-python -m flask db init
+python -m flask db migrate -m "Initial migration for Development SQLite"
+```
+
+```bash
+python -m flask db upgrade
 ```
 
 ```bash
 export FLASK_ENV=production
 ```
 
-```
-flask db migrate -m "Initial migration for Production SQLite"
+```bash
+python -m flask db init
 ```
 
 ```bash
-python -m flask db init
+python -m flask db migrate -m "Initial migration for Production SQLite"
+```
+
+```bash
+python -m flask db upgrade
 ```
 
 ## On Windows (Command Prompt)
@@ -60,24 +68,32 @@ set FLASK_APP=run.py
 set FLASK_ENV=development
 ```
 
-```
-flask db migrate -m "Initial migration for Development SQLite"
+```bash
+python -m flask db init
 ```
 
 ```bash
-python -m flask db init
+python -m flask db migrate -m "Initial migration for Development SQLite"
+```
+
+```bash
+python -m flask db upgrade
 ```
 
 ```bash
 set FLASK_ENV=production
 ```
 
-```
-flask db migrate -m "Initial migration for Production SQLite"
+```bash
+python -m flask db init
 ```
 
 ```bash
-python -m flask db init
+python -m flask db migrate -m "Initial migration for Production SQLite"
+```
+
+```bash
+python -m flask db upgrade
 ```
 
 ## On Windows (PowerShell)
@@ -89,23 +105,31 @@ $env:FLASK_APP="run.py"
 $env:FLASK_ENV="development"
 ```
 
-```
-flask db migrate -m "Initial migration for Development SQLite"
+```powershell
+python -m flask db init
 ```
 
 ```powershell
-python -m flask db init
+python -m flask db migrate -m "Initial migration for Development SQLite"
+```
+
+```powershell
+python -m flask db upgrade
 ```
 
 ```powershell
 $env:FLASK_ENV="production"
 ```
 
-```
-flask db migrate -m "Initial migration for Production SQLite"
+```powershell
+python -m flask db init
 ```
 
 ```powershell
-python -m flask db init
+python -m flask db migrate -m "Initial migration for Production SQLite"
+```
+
+```powershell
+python -m flask db upgrade
 ```
 

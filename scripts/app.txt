@@ -12,6 +12,21 @@ from sqlalchemy.sql import func
 import datetime
 import re
 
+DELTA_TYPES = ['pct', 'abs']
+DEFAULT_DELTA_TYPE = 'pct'
+CODE_MAX_LEN = 12
+TIME_FREQUENCIES = ['DA', 'D', 'W', 'M', 'B', 'Q', 'S', 'Y']
+
+
+def validate_code_len(_validate_code):
+    def wrapper(*args, **kwargs):
+        code = _validate_code(*args, **kwargs)
+        if isinstance(code, str):
+            if len(code) > CODE_MAX_LEN:
+                raise ValueError(f"Code must be {CODE_MAX_LEN} characters or less.")
+        return code
+    return wrapper
+
 # Association table for many-to-many relationship between SeriesGroup and SeriesBase
 seriesgroup_seriesbase = db.Table(
     'seriesgroup_seriesbase',
@@ -45,6 +60,15 @@ class BaseModel(db.Model):
         if commit:
             session.commit()
 
+        # Flush to ensure the instance is bound to the session
+        session.flush()
+
+        # Handle pending keywords if any
+        if hasattr(self, '_pending_keywords'):
+            for kw in self._pending_keywords:
+                self.add_keyword(kw, session=session)
+            del self._pending_keywords  # Clear pending keywords
+
     def _save_dependencies(self, session):
         """
         Override this in child classes to save any dependencies (parents or children).
@@ -62,7 +86,7 @@ class Keyword(BaseModel):
         'SeriesBase',
         secondary=seriesbase_keyword,
         back_populates='keywords',
-        lazy='dynamic'
+        lazy='select'
     )
 
     def __repr__(self):
@@ -81,6 +105,13 @@ class SeriesBase(BaseModel):
         onupdate=func.now(), nullable=False
     )
 
+    keywords = db.relationship(
+        'Keyword',
+        secondary=seriesbase_keyword,
+        back_populates='series',
+        lazy='select'  # Changed from 'dynamic' to 'select'
+    )
+
     def __init__(self, name, description=None, keywords=None, **kwargs):
         """
         Initializes a SeriesBase instance.
@@ -95,16 +126,9 @@ class SeriesBase(BaseModel):
         self.name = name
         self.description = description
         if keywords:
-            for keyword_word in keywords:
-                self.add_keyword(keyword_word)
-
-    # Many-to-Many relationship with Keyword
-    keywords = db.relationship(
-        'Keyword',
-        secondary=seriesbase_keyword,
-        back_populates='series',
-        lazy='dynamic'
-    )
+            self._pending_keywords = keywords.copy()  # Store pending keywords
+        else:
+            self._pending_keywords = []
 
     __mapper_args__ = {
         'polymorphic_identity': 'series_base',
@@ -115,29 +139,88 @@ class SeriesBase(BaseModel):
     def __repr__(self):
         return f'<SeriesBase {self.name}>'
 
-    def add_keyword(self, keyword_word):
+    def add_keyword(self, keyword_word, session=None):
         """
         Adds a keyword to the series. Creates the keyword if it doesn't exist.
+
+        Parameters:
+        - keyword_word (str): The keyword string to add.
+        - session (Session, optional): The SQLAlchemy session to use. Defaults to db.session.
         """
-        keyword = Keyword.query.filter_by(word=keyword_word).first()
+        if not isinstance(keyword_word, str):
+            raise TypeError("Keyword must be a string.")
+        if len(keyword_word) > 50:
+            raise ValueError("Keyword must be 50 characters or less.")
+
+        if session is None:
+            session = db.session
+
+        if self not in session:
+            session.add(self)
+
+        keyword = session.query(Keyword).filter_by(word=keyword_word).first()
         if not keyword:
             keyword = Keyword(word=keyword_word)
-            db.session.add(keyword)
-        if not self.keywords.filter_by(word=keyword_word).first():
+            session.add(keyword)
+        if keyword not in self.keywords:
             self.keywords.append(keyword)
 
     def remove_keyword(self, keyword_word):
         """
         Removes a keyword from the series.
+
+        Parameters:
+        - keyword_word (str): The keyword string to remove.
         """
         keyword = Keyword.query.filter_by(word=keyword_word).first()
-        if keyword and self.keywords.filter_by(word=keyword_word).first():
+        if keyword and keyword in self.keywords:
             self.keywords.remove(keyword)
+
+    @staticmethod
+    @validate_code_len
+    def _validate_code(code, class_code):
+        if class_code is not None and code is not None:
+            if class_code == code:
+                return class_code
+            else:
+                raise ValueError(
+                    "Only Code or the code specified by the class must be passed. "
+                    + "'code' is the same as the class code, but it aims to facilitate instantiation."
+                )
+        elif class_code is not None:
+            return class_code
+        elif code is not None:
+            return code
+        else:
+            raise ValueError("Either code or class code ('time_series_code' or 'series_group_code') must be provided.") 
+        
+    @staticmethod
+    def _validate_delta_type(delta_type):
+        if delta_type is None:
+            return DEFAULT_DELTA_TYPE
+        if delta_type.lower() not in DELTA_TYPES:
+            raise ValueError("delta_type must be one of the following: " + ", ".join(DELTA_TYPES))
+        return delta_type.lower()
 
 class SeriesGroup(SeriesBase):
     __tablename__ = 'series_group'
     id = db.Column(db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
-    series_group_code = db.Column(db.String(5), nullable=False, unique=True)  # Renamed and kept unique
+    series_group_code = db.Column(db.String(CODE_MAX_LEN), nullable=False, unique=True)  # Renamed and kept unique
+
+    def __init__(self, name, description=None, series_group_code=None, code=None, keywords=None, **kwargs):
+        """
+        Initializes a SeriesGroup instance.
+
+        Parameters:
+        - name (str): The name of the series group.
+        - description (str, optional): A description of the series group.
+        - series_group_code (str): A unique code for the series group.
+        - keywords (list of str, optional): A list of keyword strings to associate with the series group.
+        - **kwargs: Additional keyword arguments for other fields.
+        """
+        super().__init__(name, description=description, keywords=keywords, **kwargs)
+        self.series_group_code = self._validate_code(code, series_group_code)
+
 
     # Self-referential relationship for nested SeriesGroups
     parent_id = db.Column(db.Integer, db.ForeignKey('series_group.id'), nullable=True)
@@ -161,20 +244,114 @@ class SeriesGroup(SeriesBase):
     }
 
     def __repr__(self):
-        return f'<SeriesGroup {self.name}>'
+        return (
+            f'SeriesGroup(name={self.name}, code={self.time_series_code}, '
+            + f'n_children={self.series.count()})'
+        )
 
 class TimeSeries(SeriesBase):
     __tablename__ = 'time_series'
     id = db.Column(db.Integer, db.ForeignKey('series_base.id'), primary_key=True)
-    time_series_code = db.Column(db.String(10), nullable=False, unique=True)  # New unique field
-    type_id = db.Column(db.Integer, db.ForeignKey('time_series_type.id'), nullable=False)
+    time_series_code = db.Column(db.String(CODE_MAX_LEN), nullable=False, unique=True)  # New unique field
+    type_id = db.Column(db.Integer, db.ForeignKey('time_series_type.id'), nullable=True)
+    time_frequency = db.Column(db.String(3), nullable=True, default='M')
     delta_type = db.Column(db.String(10), nullable=True, default='pct')
 
-    data_points = db.relationship('DataPoint', backref='time_series', lazy=True)
+    def save(
+            self,
+            allow_update=True,
+            keep_old_description=True,
+            keep_old_delta_type=True,
+            keep_old_time_frequency=False,
+            join_keywords=True,
+            join_data_points=True,
+            session=None,
+            commit=True
+        ):
+        # check if timeseries with that name and or code already exists
+        time_series_with_same_name = TimeSeries.query.filter_by(name=self.name).first()
+        time_series_with_same_code = TimeSeries.query.filter_by(time_series_code=self.time_series_code).first()
+
+        if time_series_with_same_name or time_series_with_same_code:
+            if not allow_update:
+                if time_series_with_same_name and time_series_with_same_code:
+                    raise ValueError("TimeSeries with the same name and code already exists.")
+                elif time_series_with_same_name:
+                    raise ValueError("TimeSeries with the same name already exists.")
+                elif time_series_with_same_code:
+                    raise ValueError("TimeSeries with the same code already exists.")
+            else:
+                if time_series_with_same_name and time_series_with_same_code:
+                    if time_series_with_same_code != time_series_with_same_name:
+                        raise ValueError("One time series with the same name and another with the same code already exists. Change one of them.")
+                old_time_series = time_series_with_same_name or time_series_with_same_code
+                self.id = old_time_series.id
+                self.date_create = old_time_series.date_create
+                if keep_old_description:
+                    if old_time_series.description is not None:
+                        self.description = old_time_series.description
+                if keep_old_delta_type:
+                    if old_time_series.delta_type is not None:
+                        self.delta_type = old_time_series.delta_type
+                if keep_old_time_frequency:
+                    if old_time_series.time_frequency is not None:
+                        self.time_frequency = old_time_series.time_frequency
+                else:
+                    if self.time_frequency is None:
+                        self.time_frequency = old_time_series.time_frequency
+                if join_keywords:
+                    self.join_keywords(old_time_series.keywords)
+                self.date_update = func.now()
+                if join_data_points:
+                    self.join_data_points(old_time_series.data_points)
+                db.session.delete(old_time_series)
+
+        super().save(session=session, commit=commit)
+
+
+    def join_data_points(self, new_data_points):
+        """
+        Joins the provided DataPoint objects to the TimeSeries object.
+        """
+        self.data_points.extend(new_data_points)
+
+    def join_keywords(self, new_keywords):
+        """
+        Joins the provided Keyword objects to the TimeSeries object.
+        """
+        self.keywords.extend(new_keywords)
+
+    @property
+    def number_data_points(self):
+        try:
+            return len(self.data_points)
+        except TypeError:
+            return 0
+
+    def __repr__(self):
+        return (
+            f'TimeSeries(name={self.name}, code={self.time_series_code}, '
+            + f'len={self.number_data_points}, freq={self.time_frequency}, delta={self.delta_type})'
+        )
+
+    data_points = db.relationship(
+        'DataPoint',
+        backref='time_series',
+        lazy=True,
+        cascade='all, delete-orphan'
+    )
 
     __mapper_args__ = {
         'polymorphic_identity': 'time_series',
     }
+
+    def __init__(self, name, code=None, time_series_code=None, type_id=None, time_frequency=None, delta_type=None, **kwargs):
+        super().__init__(name, **kwargs)
+        self.time_series_code = self._validate_code(code, time_series_code)
+        self.type_id = type_id
+        self.time_frequency = time_frequency
+        self.delta_type = self._validate_delta_type(delta_type)
+
 
     def _save_dependencies(self, session):
         """
@@ -240,6 +417,8 @@ class TimeSeries(SeriesBase):
         series_groups=None,
         time_series_type=None,
         name=None,
+        code=None,
+        time_frequency=None,
         description=None,
         date_column=None,
         all_columns_have_same_series_groups=False
@@ -269,20 +448,38 @@ class TimeSeries(SeriesBase):
             if name is None:
                 name = df.columns[0]
 
-            # Allow series_groups to be optional
-            if series_groups is not None:
-                if isinstance(description, list):
-                    description = description[0]
-            else:
-                if description is None:
-                    description = ""
-            
+            if isinstance(time_frequency, (list, tuple)):
+                if len(time_frequency) != 1:
+                    raise ValueError("Time frequency list must match the number of columns in the DataFrame.")
+                time_frequency = time_frequency[0]
+            if isinstance(time_frequency, str):
+                if time_frequency not in TIME_FREQUENCIES:
+                    raise ValueError("Time frequency must be one of the following: " + ", ".join(TIME_FREQUENCIES))
+                
+            if code is None:
+                raise ValueError("Code must be provided for each column passed.")
+            elif isinstance(code, (list, tuple)):
+                if len(code) != 1:
+                    raise ValueError("Code list must match the number of columns in the DataFrame.")
+                code = code[0]
+            elif not isinstance(code, str):
+                raise ValueError("Code must be provided as string or as a list/tuple with len=1.")
+
+            if isinstance(time_series_type, (list, tuple)):
+                if len(time_series_type) != 1:
+                    raise ValueError("TimeSeriesType list must match the number of columns in the DataFrame.")
+                time_series_type = time_series_type[0]
+            if not isinstance(time_series_type, (str, TimeSeriesType)) and time_series_type is not None:
+                raise ValueError("TimeSeriesType must be provided as string, None or a list/tuple with len=1.")
+
             return cls.build_time_series_object(
                 df.iloc[:, 0].values,
                 df.index,
                 name,
+                code,
+                time_frequency,
                 series_groups,  # Can be None
-                time_series_type,
+                TimeSeriesType._convert_to_time_series_type(time_series_type),
                 description
             )
         else:
@@ -294,6 +491,33 @@ class TimeSeries(SeriesBase):
                 raise ValueError("Name list must match the number of columns in the DataFrame.")
             else:
                 raise ValueError("Name must be provided as list")
+            
+            if isinstance(time_frequency, (list, tuple)):
+                if len(time_frequency) != len(df.columns):
+                    raise ValueError("Time frequency list must match the number of columns in the DataFrame or be equal for all.")
+                if not all([tf in TIME_FREQUENCIES for tf in time_frequency]):
+                    raise ValueError("Time frequency must be one of the following: " + ", ".join(TIME_FREQUENCIES))
+            elif isinstance(time_frequency, str) or time_frequency is None:
+                if time_frequency not in TIME_FREQUENCIES and time_frequency is not None:
+                    raise ValueError("Time frequency must be one of the following: " + ", ".join(TIME_FREQUENCIES))
+                time_frequency = [time_frequency] * len(df.columns)
+            elif time_frequency is not None:
+                raise ValueError("Time frequency must be a string or a list of strings.")
+            
+            if isinstance(time_series_type, (list, tuple)):
+                if len(time_series_type) != len(df.columns):
+                    raise ValueError("TimeSeriesType list must match the number of columns in the DataFrame.")
+                if not all([isinstance(tst, (TimeSeriesType, str)) or tst is None for tst in time_series_type]):
+                    raise ValueError("TimeSeriesType must be an instance of TimeSeriesType or string.")
+            elif isinstance(time_series_type, (TimeSeriesType, str)) or time_series_type is None:
+                time_series_type = [time_series_type] * len(df.columns)
+            elif time_series_type is not None:
+                raise ValueError("TimeSeriesType must be an instance of TimeSeriesType, string, or a list of strings.")
+            
+            if code is None or not isinstance(code, (list, tuple)):
+                raise ValueError("Code must be provided for each column as a list or tuple passed.")
+            elif len(code) != len(df.columns):
+                raise ValueError("Code list must match the number of columns in the DataFrame.")
             
             # Allow series_groups to be optional
             if series_groups is not None:
@@ -334,8 +558,10 @@ class TimeSeries(SeriesBase):
                     df[col].values,
                     df.index,
                     name[i],
+                    code[i],
+                    time_frequency[i],
                     col_series_groups,
-                    time_series_type,
+                    TimeSeriesType._convert_to_time_series_type(time_series_type[i]),
                     description
                 ))
             return all_time_series
@@ -375,7 +601,7 @@ class TimeSeries(SeriesBase):
         return True
 
     @classmethod
-    def build_time_series_object(cls, values, dates, time_series_name, series_groups, time_series_type, description=None):
+    def build_time_series_object(cls, values, dates, time_series_name, time_series_code, time_frequency, series_groups, time_series_type, description=None):
         """
         Build a TimeSeries object with DataPoint objects from provided values and dates.
         """
@@ -384,8 +610,11 @@ class TimeSeries(SeriesBase):
             data_points.append(DataPoint(date=dates[i], value=values[i]))
         ts = cls(
             name=time_series_name,
-            data_points=data_points
+            code=time_series_code,
+            data_points=data_points,
         )
+        if time_frequency is not None:
+            ts.time_frequency = time_frequency
         if description is not None:
             ts.description = description
         if isinstance(time_series_type, TimeSeriesType):
@@ -421,7 +650,7 @@ class DataPoint(BaseModel):
     )
 
     def __repr__(self):
-        return f'<DataPoint {self.date}: {self.value}>'
+        return f'DP({self.date}: {self.value})'
 
     def _save_dependencies(self, session):
         """
@@ -437,8 +666,24 @@ class TimeSeriesType(BaseModel):
     __tablename__ = 'time_series_type'
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(50), nullable=False, unique=True)
-    description = db.Column(db.String(200))
+    description = db.Column(db.String(400))
     time_series = db.relationship('TimeSeries', backref='time_series_type', lazy=True)
+
+    @classmethod
+    def _convert_to_time_series_type(cls, tst):
+        if tst is None:
+            return tst
+        elif isinstance(tst, cls):
+            return tst
+        elif isinstance(tst, str):
+            tst = cls.query.filter_by(name=tst).first()
+            if tst is not None:
+                return tst
+            else:
+                return cls(name=tst)
+        else:
+            raise ValueError("TimeSeriesType must be an instance of TimeSeriesType or a string.")
+        
 
     date_create = db.Column(
         db.DateTime(timezone=True), server_default=func.now(),
@@ -454,7 +699,7 @@ class TimeSeriesType(BaseModel):
     }
 
     def __repr__(self):
-        return f'<TimeSeriesType {self.name}>'
+        return f'TimeSeriesType(name={self.name})>'
 
 ================================================================================
 
@@ -491,6 +736,40 @@ def create_app(config_name=None):
         from . import models
     
     return app
+
+================================================================================
+
+FILE NAME: app/utils.py
+
+import numpy as np
+import pandas as pd
+from sklearn.datasets import make_sparse_spd_matrix
+from typing import Union
+from typing_extensions import Literal
+
+def create_returns_df(
+        n_samples: int = 1000,
+        n_assets: int = 5,
+        avg_return: float = .004,
+        alpha_sparsity: float = .3,
+        seed: int = 42,
+        end_date: str = "2024-01-01",
+        date_frequecy: Union[Literal["ME", "BM", "BQ", "BA", "W", "D"]] = "ME", # For month
+        variance_multiplier: float = .03,
+        truncate: bool = True
+    ) -> pd.DataFrame:
+    if variance_multiplier > 0.5 or variance_multiplier <= 0:
+        raise ValueError("variance_multiplier must be between 0 and 0.5")
+    rng = np.random.RandomState(seed)
+    asset_names = ["".join(rng.choice(list("ABCDEFGHIJKLMNOPQRSTUVWXYZ"), 3)) for i in range(n_assets)]
+    cov_matrix = make_sparse_spd_matrix(n_dim=n_assets, alpha=alpha_sparsity)
+    cov_matrix /= (np.max(cov_matrix) / variance_multiplier)
+    returns = np.random.multivariate_normal(np.ones(n_assets) * avg_return, cov_matrix, n_samples)
+    if truncate:
+        returns[returns < -1] = -.95
+    returns_df = pd.DataFrame(returns, columns=asset_names)
+    returns_df.index = pd.date_range(end=end_date, periods=n_samples, freq=date_frequecy)
+    return returns_df
 
 ================================================================================
 

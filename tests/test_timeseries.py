@@ -1,5 +1,7 @@
 # tests/test_timeseries.py
 
+import random
+import string
 import pytest
 import datetime
 import pandas as pd
@@ -20,6 +22,7 @@ def test_from_dataframe_single_column(
     with app.app_context():
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
+            code='AAPL',  # Add a code for the TimeSeries
             series_groups=[seriesgroup],  # Pass as a list of objects
             time_series_type=tstype  # Assign the object directly
         )
@@ -50,6 +53,7 @@ def test_from_dataframe_single_column_with_seriesgroup_and_tstype(
     with app.app_context():
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
+            code='AAPL',
             series_groups=[seriesgroup],  # Pass as a list of objects
             time_series_type=tstype  # Assign the object directly
         )
@@ -86,6 +90,7 @@ def test_from_dataframe_single_column_with_date_as_column(
             df=sample_df,
             series_groups=[seriesgroup],  # Pass as a list of objects
             time_series_type=tstype,  # Assign the object directly
+            code='AAPL',
             date_column="Datetime"
         )
 
@@ -117,11 +122,13 @@ def test_from_dataframe_multi_column(
         # Since there are multiple columns, provide a list of SeriesGroup objects
         # For simplicity, using the same SeriesGroup for all columns
         series_groups = [seriesgroup for _ in range(num_columns)]
+        codes = [''.join(random.choices(string.ascii_uppercase, k=3)) for _ in range(num_columns)]
 
         ts_objs = TimeSeries.from_dataframe(
             df=sample_df_multiple_columns,
             series_groups=series_groups,  # Pass as a list of objects
-            time_series_type=tstype  # Assign the object directly
+            time_series_type=tstype,  # Assign the object directly
+            code=codes  # Add a code for all TimeSeries
         )
 
         # Expect a list of TimeSeries objects
@@ -145,11 +152,13 @@ def test_to_dataframe_multi_column(
         # Provide a list of SeriesGroup objects matching the number of columns
         num_columns = len(sample_df_multiple_columns.columns)
         series_groups = [seriesgroup for _ in range(num_columns)]
+        codes = [''.join(random.choices(string.ascii_uppercase, k=3)) for _ in range(num_columns)]
 
         ts_objs = TimeSeries.from_dataframe(
             df=sample_df_multiple_columns,
             series_groups=series_groups,  # Pass as a list of objects
-            time_series_type=tstype  # Assign the object directly
+            time_series_type=tstype,  # Assign the object directly
+            code=codes  # Add a code for all TimeSeries
         )
         for ts_obj in ts_objs:
             ts_dataframe = ts_obj.to_dataframe()
@@ -171,7 +180,8 @@ def test_to_dataframe_single_column(
         ts_obj = TimeSeries.from_dataframe(
             df=sample_df_single_column,
             series_groups=[seriesgroup],  # Pass as a list of objects
-            time_series_type=tstype  # Assign the object directly
+            time_series_type=tstype,  # Assign the object directly
+            code='AAPL'
         )
 
         ts_dataframe = ts_obj.to_dataframe()

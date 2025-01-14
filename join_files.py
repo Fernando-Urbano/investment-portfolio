@@ -74,3 +74,4 @@ if __name__ == "__main__":
     scripts_to_file("tests", ["py", "ini"], "Test files:", "scripts/tests", ignore_files=["__pycache__"])
     scripts_to_file("migrations", ["py", "ini"], "Migrations files:", "scripts/migrations")
     scripts_to_file("scripts", "txt", ALL_EXPLANATION, "scripts/all")
+    os.system("cat scripts/all.txt | pbcopy")

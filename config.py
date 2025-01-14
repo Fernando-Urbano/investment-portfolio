@@ -24,7 +24,7 @@ class ProductionConfig(Config):
     """Production configuration."""
     # You could use another file-based (or a real production DB).
     # For a simple setup, here’s an example of a file-based prod DB:
-    SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(basedir, 'prod_database.db')}"
+    SQLALCHEMY_DATABASE_URI = f"sqlite:///{os.path.join(basedir, 'prd_database.db')}"
 
 # Dictionary to easily access configurations
 config = {
