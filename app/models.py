@@ -143,6 +143,11 @@ class SeriesBase(BaseModel):
         - keyword_word (str): The keyword string to add.
         - session (Session, optional): The SQLAlchemy session to use. Defaults to db.session.
         """
+        if isinstance(keyword_word, (list, tuple)):
+            for kw in keyword_word:
+                self.add_keyword(kw, session=session)
+            return
+
         if not isinstance(keyword_word, str):
             raise TypeError("Keyword must be a string.")
         if len(keyword_word) > 50:
@@ -150,9 +155,6 @@ class SeriesBase(BaseModel):
 
         if session is None:
             session = db.session
-
-        if self not in session:
-            session.add(self)
 
         keyword = session.query(Keyword).filter_by(word=keyword_word).first()
         if not keyword:
@@ -197,6 +199,18 @@ class SeriesBase(BaseModel):
         if delta_type.lower() not in DELTA_TYPES:
             raise ValueError("delta_type must be one of the following: " + ", ".join(DELTA_TYPES))
         return delta_type.lower()
+    
+    @staticmethod
+    def _validate_description(description):
+        if description is not None and not isinstance(description, str):
+            raise ValueError("Description must be a string or None.")
+        return description
+    
+    @staticmethod
+    def _validate_time_frequency(time_frequency):
+        if time_frequency is not None and time_frequency not in TIME_FREQUENCIES:
+            raise ValueError("Time frequency must be one of the following: " + ", ".join(TIME_FREQUENCIES))
+        return time_frequency
 
 class SeriesGroup(SeriesBase):
     __tablename__ = 'series_group'
@@ -515,6 +529,7 @@ class TimeSeries(SeriesBase):
         name=None,
         code=None,
         time_frequency=None,
+        delta_type=None,
         description=None,
         date_column=None,
         all_columns_have_same_series_groups=False
@@ -567,26 +582,38 @@ class TimeSeries(SeriesBase):
                 time_series_type = time_series_type[0]
             if not isinstance(time_series_type, (str, TimeSeriesType)) and time_series_type is not None:
                 raise ValueError("TimeSeriesType must be provided as string, None or a list/tuple with len=1.")
-
+            
+            if isinstance(delta_type, (list, tuple)):
+                if len(delta_type) != 1:
+                    raise ValueError("Delta type list must match the number of columns in the DataFrame.")
+                delta_type = delta_type[0]
+            if not isinstance(delta_type, str) and delta_type is not None:
+                raise ValueError("Delta type must be provided as string, None or a list/tuple with len=1.")
+            elif isinstance(delta_type, str):
+                delta_type = delta_type.lower()
+                if delta_type not in DELTA_TYPES:
+                    raise ValueError("Delta type must be one of the following: " + ", ".join(DELTA_TYPES))                
+            
             return cls.build_time_series_object(
                 df.iloc[:, 0].values,
                 df.index,
                 name,
                 code,
                 time_frequency,
+                delta_type,
                 series_groups,  # Can be None
                 TimeSeriesType._convert_to_time_series_type(time_series_type),
                 description
             )
         else:
             if name is None:
-                name = df.columns
+                name = list(df.columns)
+            elif isinstance(name, tuple):
+                name = list(name)
             elif name and not isinstance(name, list):
                 raise ValueError("Name must be a list if multiple columns are provided.")
             elif len(name) != len(df.columns):
                 raise ValueError("Name list must match the number of columns in the DataFrame.")
-            else:
-                raise ValueError("Name must be provided as list")
             
             if isinstance(time_frequency, (list, tuple)):
                 if len(time_frequency) != len(df.columns):
@@ -610,10 +637,33 @@ class TimeSeries(SeriesBase):
             elif time_series_type is not None:
                 raise ValueError("TimeSeriesType must be an instance of TimeSeriesType, string, or a list of strings.")
             
+            if isinstance(delta_type, (list, tuple)):
+                if len(delta_type) != len(df.columns):
+                    raise ValueError("Delta type list must match the number of columns in the DataFrame.")
+                if not all([dt in DELTA_TYPES for dt in delta_type]):
+                    raise ValueError("Delta type must be one of the following: " + ", ".join(DELTA_TYPES))
+            elif isinstance(delta_type, str) or delta_type is None:
+                if isinstance(delta_type, str):
+                    delta_type = delta_type.lower()
+                if delta_type not in DELTA_TYPES and delta_type is not None:
+                    raise ValueError("Delta type must be one of the following: " + ", ".join(DELTA_TYPES))
+                delta_type = [delta_type] * len(df.columns)
+            
             if code is None or not isinstance(code, (list, tuple)):
                 raise ValueError("Code must be provided for each column as a list or tuple passed.")
             elif len(code) != len(df.columns):
                 raise ValueError("Code list must match the number of columns in the DataFrame.")
+            
+            if isinstance(description, str):
+                description = [description] * len(df.columns)
+            elif isinstance(description, (list, tuple)):
+                description = list(description) if isinstance(description, tuple) else description
+                if len(description) != len(df.columns):
+                    raise ValueError("Description list must match the number of columns in the DataFrame.")
+            elif description is None:
+                description = [description] * len(df.columns)
+            else:
+                raise ValueError("Description must be a string, a list or None if multiple columns")
             
             # Allow series_groups to be optional
             if series_groups is not None:
@@ -656,9 +706,10 @@ class TimeSeries(SeriesBase):
                     name[i],
                     code[i],
                     time_frequency[i],
+                    delta_type[i],
                     col_series_groups,
                     TimeSeriesType._convert_to_time_series_type(time_series_type[i]),
-                    description
+                    description[i]
                 ))
             return all_time_series
 
@@ -697,10 +748,25 @@ class TimeSeries(SeriesBase):
         return True
 
     @classmethod
-    def build_time_series_object(cls, values, dates, time_series_name, time_series_code, time_frequency, series_groups, time_series_type, description=None):
+    def build_time_series_object(
+        cls,
+        values,
+        dates,
+        time_series_name,
+        time_series_code,
+        time_frequency,
+        delta_type,
+        series_groups,
+        time_series_type,
+        description=None
+    ):
         """
         Build a TimeSeries object with DataPoint objects from provided values and dates.
         """
+        cls._validate_description(description)
+        cls._validate_time_frequency(time_frequency)
+        cls._validate_delta_type(delta_type)
+
         data_points = []
         for i in range(len(values)):
             data_points.append(DataPoint(date=dates[i], value=values[i]))
@@ -711,6 +777,8 @@ class TimeSeries(SeriesBase):
         )
         if time_frequency is not None:
             ts.time_frequency = time_frequency
+        if delta_type is not None:
+            ts.delta_type = delta_type
         if description is not None:
             ts.description = description
         if isinstance(time_series_type, TimeSeriesType):
@@ -781,6 +849,85 @@ class TimeSeries(SeriesBase):
         session.execute(stmt)
         if commit:
             session.commit()
+
+    @staticmethod
+    def join_timeseries_to_dataframe(list_of_timeseries, how='outer'):
+        """
+        Joins multiple TimeSeries objects into a single DataFrame.
+        """
+        if isinstance(list_of_timeseries, tuple):
+            list_of_timeseries = list(list_of_timeseries)
+        if not isinstance(list_of_timeseries, list):
+            raise ValueError("list_of_timeseries must be a list of TimeSeries objects.")
+        if not all([isinstance(ts, TimeSeries) for ts in list_of_timeseries]):
+            raise ValueError("list_of_timeseries must be a list of TimeSeries objects.")
+        if how not in ['outer', 'inner', 'left', 'right']:
+            raise ValueError("how must be one of 'outer', 'inner', 'left', 'right'.")
+
+        # Start with the first TimeSeries
+        df = list_of_timeseries[0].to_dataframe()
+
+        # Join the rest
+        for ts in list_of_timeseries[1:]:
+            df = df.join(ts.to_dataframe(), how=how)
+
+        return df
+    
+    def join_with_other_timeseries_to_dataframe(self, list_of_other_timeseries, how='outer'):
+        if isinstance(list_of_other_timeseries, tuple):
+            list_of_other_timeseries = list(list_of_other_timeseries)
+        elif isinstance(list_of_other_timeseries, TimeSeries):
+            list_of_other_timeseries = [list_of_other_timeseries]
+        if not isinstance(list_of_other_timeseries, list):
+            raise ValueError("list_of_other_timeseries must be a list of TimeSeries objects.")
+        if not all([isinstance(ts, TimeSeries) for ts in list_of_other_timeseries]):
+            raise ValueError("list_of_other_timeseries must be a list of TimeSeries objects.")
+        if how not in ['outer', 'inner', 'left', 'right']:
+            raise ValueError("how must be one of 'outer', 'inner', 'left', 'right'.")
+        
+        return self.join_timeseries_to_dataframe([self] + list_of_other_timeseries, how=how)
+    
+    @classmethod
+    def save_all(
+        cls,
+        list_of_timeseries,
+        allow_update=True,
+        keep_old_description=True,
+        keep_old_delta_type=True,
+        keep_old_time_frequency=False,
+        join_keywords=True,
+        join_data_points=True,
+        session=None,
+        commit=True
+    ):
+        if session is None:
+            session = db.session
+
+        if isinstance(list_of_timeseries, tuple):
+            list_of_timeseries = list(list_of_timeseries)
+        if not isinstance(list_of_timeseries, list):
+            raise ValueError("list_of_timeseries must be a list of TimeSeries objects.")
+        if not all([isinstance(ts, TimeSeries) for ts in list_of_timeseries]):
+            raise ValueError("list_of_timeseries must be a list of TimeSeries objects.")
+        
+        for ts in list_of_timeseries:
+            ts.save(
+                allow_update,
+                keep_old_description,
+                keep_old_delta_type,
+                keep_old_time_frequency,
+                join_keywords,
+                join_data_points,
+                session,
+                commit=False
+            )
+
+        if commit:
+            session.commit()
+            
+        return
+    
+
 
 class DataPoint(BaseModel):
     __tablename__ = 'data_point'

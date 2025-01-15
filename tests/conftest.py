@@ -53,5 +53,6 @@ from .fixtures import (
     populate_test_db,
     sample_df_single_column,    
     sample_df_multiple_columns,
-    create_seriesgroup_and_type  # Updated fixture name
+    create_seriesgroup_and_type,
+    basic_tstype,
 )

@@ -135,3 +135,18 @@ def sample_df_multiple_columns():
     volumes = rng.integers(1000, 10000, 252)
     dates = pd.date_range("2025-01-01", periods=252, freq="D")
     return pd.DataFrame({"price": prices, "volume": volumes}, index=dates)
+
+
+@pytest.fixture
+def basic_tstype(app):
+    """
+    Fixture to create a basic TimeSeriesType for testing.
+    """
+    with app.app_context():
+        tstype = TimeSeriesType(
+            name="BasicType",
+            description="A basic time series type for testing."
+        )
+        db.session.add(tstype)
+        db.session.commit()
+    return tstype
